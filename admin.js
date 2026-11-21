@@ -14,7 +14,7 @@
   const LEVEL = { red: 0, yellow: 1, green: 2, none: 3 };
   const DOT = { red: 'bg-signal-red', yellow: 'bg-signal-yellow', green: 'bg-signal-green', none: 'bg-slate-300' };
   const TIRE = { vara: 'Vară', iarna: 'Iarnă', 'all-season': 'All-season' };
-  const SOON = ['Combustibil', 'Istoric șoferi', 'Hartă live'];
+  const SOON = ['Istoric șoferi', 'Hartă live'];
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nf = (n) => Number(n).toLocaleString('de-DE');
@@ -64,7 +64,7 @@
   const navBtn = (id, label) =>
     `<button data-nav="${id}" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-white/10">${label}</button>`;
   const tabBtn = (id, label) =>
-    `<button data-nav="${id}" class="tab-btn py-3 text-slate-500">${label}</button>`;
+    `<button data-nav="${id}" class="tab-btn py-3 text-xs text-slate-500">${label}</button>`;
 
   const shell = (email) => `
     <style>
@@ -82,6 +82,7 @@
           ${navBtn('vehicles', 'Vehicule')}
           ${navBtn('tasks', 'Task-uri')}
           ${navBtn('defects', 'Defecțiuni')}
+          ${navBtn('fuel', 'Combustibil')}
           <div class="mt-4 mb-1 px-3 text-sm text-slate-400">În curând</div>
           ${SOON.map((s) => `<div class="px-3 py-1.5 text-slate-400">${s}</div>`).join('')}
         </nav>
@@ -99,19 +100,21 @@
         <main id="adminView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-5xl"></main>
       </div>
 
-      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-4"
+      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-5"
            style="padding-bottom:env(safe-area-inset-bottom,0px)">
         ${tabBtn('alerts', 'Alerte')}
         ${tabBtn('vehicles', 'Vehicule')}
         ${tabBtn('tasks', 'Task-uri')}
         ${tabBtn('defects', 'Defecțiuni')}
+        ${tabBtn('fuel', 'Combustibil')}
       </nav>
     </div>`;
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
-    let vehicles = [], tasks = [], people = [], defects = [];
+    let vehicles = [], tasks = [], people = [], defects = [], fuel = [];
     let view = 'alerts';
+    let fuelRange = 'all';
     let loading = true;
     let loadError = '';
 
@@ -124,16 +127,17 @@
 
     async function reload() {
       loading = true; paint();
-      const [v, t, u, d] = await Promise.all([
+      const [v, t, u, d, f] = await Promise.all([
         sb.from('vehicles').select('*').order('plate_number'),
         sb.from('tasks').select('*').order('created_at', { ascending: false }),
         sb.from('users').select('id, email, role').order('email'),
-        sb.from('defects').select('*').order('created_at', { ascending: false })
+        sb.from('defects').select('*').order('created_at', { ascending: false }),
+        sb.from('fuel_logs').select('*').order('created_at', { ascending: false }).limit(2000)
       ]);
       loading = false;
-      const err = v.error || t.error || u.error || d.error;
+      const err = v.error || t.error || u.error || d.error || f.error;
       loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
-      vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || [];
+      vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || []; fuel = f.data || [];
       paint();
     }
 
@@ -145,7 +149,8 @@
       if (view === 'alerts') paintAlerts();
       else if (view === 'vehicles') paintVehicles();
       else if (view === 'tasks') paintTasks();
-      else paintDefects();
+      else if (view === 'defects') paintDefects();
+      else paintFuel();
     }
 
     const emptyState = () => `
@@ -523,6 +528,123 @@
         const d = defects.find((x) => x.id === b.dataset.ddel);
         if (!d || !confirm('Ștergi această defecțiune? Acțiunea nu poate fi anulată.')) return;
         const { error } = await sb.from('defects').delete().eq('id', d.id);
+        if (error) return alert('Nu am putut șterge: ' + error.message);
+        reload();
+      }));
+    }
+
+    // ----- Combustibil -----
+    const eur = (n) => Number(n).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' });
+    const n1 = (n, d = 1) => Number(n).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+    const CONS_MIN = 3, CONS_MAX = 40;   // L/100 km: în afara acestui interval, datele par greșite
+
+    function paintFuel() {
+      // 1) Consumul pe fiecare interval dintre două alimentări (metoda "plin la plin")
+      const byVeh = {};
+      fuel.forEach((l) => { (byVeh[l.vehicle_id] = byVeh[l.vehicle_id] || []).push({ ...l }); });
+      Object.values(byVeh).forEach((arr) => {
+        arr.sort((a, b) => a.kilometers - b.kilometers || new Date(a.created_at) - new Date(b.created_at));
+        arr.forEach((l, i) => {
+          const dist = i ? l.kilometers - arr[i - 1].kilometers : 0;
+          l.dist = dist > 0 ? dist : 0;
+          l.cons = dist > 0 ? (Number(l.liters) / dist) * 100 : null;
+        });
+      });
+      const since = fuelRange === 'all' ? 0 : Date.now() - Number(fuelRange) * 86400000;
+      const inRange = (l) => new Date(l.created_at).getTime() >= since;
+
+      // 2) Sinteză pe vehicul
+      const sum = (arr, k) => arr.reduce((s, l) => s + Number(l[k]), 0);
+      const summary = Object.entries(byVeh).map(([vid, arr]) => {
+        const rows = arr.filter(inRange);
+        const wc = rows.filter((l) => l.cons != null);
+        const dist = sum(wc, 'dist'), litCons = sum(wc, 'liters');
+        const avg = dist > 0 ? (litCons / dist) * 100 : null;
+        const last = wc.length ? wc[wc.length - 1].cons : null;
+        let level = 'none';
+        if (avg != null) level = wc.length >= 3 && last > avg * 1.25 ? 'yellow' : 'green';
+        return { vid, fills: rows.length, cost: sum(rows, 'total_price'), liters: sum(rows, 'liters'), dist, litCons, avg, last, level };
+      }).filter((r) => r.fills > 0).sort((a, b) => plateOf(a.vid).localeCompare(plateOf(b.vid)));
+
+      const totCost = summary.reduce((s, r) => s + r.cost, 0);
+      const totLit = summary.reduce((s, r) => s + r.liters, 0);
+      const totDist = summary.reduce((s, r) => s + r.dist, 0);
+      const totLitCons = summary.reduce((s, r) => s + r.litCons, 0);
+      const fleetAvg = totDist > 0 ? (totLitCons / totDist) * 100 : null;
+
+      const logs = Object.values(byVeh).flat().filter(inRange)
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 50);
+
+      const tile = (label, value) => `
+        <div class="bg-white rounded-xl border border-slate-200 p-4">
+          <div class="text-xl font-semibold text-navy-900">${value}</div>
+          <div class="text-sm text-slate-500">${label}</div>
+        </div>`;
+
+      $view.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+          <h1 class="text-2xl font-semibold text-navy-900">Combustibil</h1>
+          <select id="fuelRange" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            <option value="all" ${fuelRange === 'all' ? 'selected' : ''}>Toată perioada</option>
+            <option value="30" ${fuelRange === '30' ? 'selected' : ''}>Ultimele 30 de zile</option>
+            <option value="90" ${fuelRange === '90' ? 'selected' : ''}>Ultimele 90 de zile</option>
+          </select>
+        </div>
+        ${fuel.length ? `
+        <div class="mt-5 grid grid-cols-3 gap-3">
+          ${tile('Cheltuit', eur(totCost))}${tile('Litri', n1(totLit, 1) + ' L')}${tile('Consum mediu', fleetAvg != null ? n1(fleetAvg) + ' L/100 km' : '–')}
+        </div>
+
+        <h2 class="mt-8 mb-3 font-semibold text-slate-600">Pe vehicul</h2>
+        <div class="grid gap-3 md:grid-cols-2">
+          ${summary.length ? summary.map((r) => {
+            const v = vehicles.find((x) => x.id === r.vid) || {};
+            return `
+            <article class="bg-white rounded-xl border border-slate-200 p-4">
+              <div class="flex items-center gap-3">
+                <span class="w-3 h-3 rounded-full ${DOT[r.level]}"></span>
+                <h3 class="font-semibold text-navy-900">${esc(v.plate_number || '–')}</h3>
+                <span class="text-slate-500 truncate">${esc(v.model || '')}</span>
+              </div>
+              <dl class="mt-3 grid grid-cols-2 gap-3 text-sm">
+                <div><dt class="text-slate-500">Consum mediu</dt><dd class="font-medium">${r.avg != null ? n1(r.avg) + ' L/100 km' : '–'}</dd></div>
+                <div><dt class="text-slate-500">Ultimul consum</dt><dd class="font-medium">${r.last != null ? n1(r.last) + ' L/100 km' : '–'}</dd></div>
+                <div><dt class="text-slate-500">Litri (${r.fills} alim.)</dt><dd class="font-medium">${n1(r.liters, 1)} L</dd></div>
+                <div><dt class="text-slate-500">Cheltuit</dt><dd class="font-medium">${eur(r.cost)}</dd></div>
+              </dl>
+              ${r.level === 'yellow' ? '<p class="mt-2 text-sm text-slate-500">Ultimul consum este cu peste 25% peste medie. Merită verificat.</p>' : ''}
+              ${r.avg == null ? '<p class="mt-2 text-sm text-slate-400">Consumul se calculează după a doua alimentare.</p>' : ''}
+            </article>`;
+          }).join('') : '<p class="text-sm text-slate-400">Nicio alimentare în perioada aleasă.</p>'}
+        </div>
+
+        <h2 class="mt-8 mb-3 font-semibold text-slate-600">Ultimele alimentări</h2>
+        <div class="space-y-2">
+          ${logs.map((l) => {
+            const odd = l.cons != null && (l.cons < CONS_MIN || l.cons > CONS_MAX);
+            return `
+            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+              <div class="flex justify-between gap-2">
+                <span class="font-medium text-navy-900">${esc(plateOf(l.vehicle_id))}</span>
+                <span class="text-slate-500">${fmtTs(l.created_at)}</span>
+              </div>
+              <div class="mt-1 text-slate-600">${nf(l.kilometers)} km · ${n1(l.liters, 2)} L · ${eur(l.total_price)} · ${eur(l.total_price / l.liters)}/L</div>
+              <div class="mt-1 text-slate-500">${esc(emailOf(l.user_id))}${l.cons != null ? ' · ' + n1(l.cons) + ' L/100 km' : ''}${odd ? ' <span class="text-signal-red">valoare neobișnuită, verifică km și litri</span>' : ''}</div>
+              <div class="mt-2 flex gap-2">
+                ${l.receipt_photo_url ? `<button data-fphoto="${esc(l.receipt_photo_url)}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Vezi bonul</button>` : '<span class="text-sm text-slate-400 py-1.5">Fără bon</span>'}
+                <button data-fdel="${l.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+              </div>
+            </div>`;
+          }).join('') || '<p class="text-sm text-slate-400">Nicio alimentare în perioada aleasă.</p>'}
+        </div>` : '<p class="mt-5 rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nu există alimentări încă. Apar aici după ce angajații le adaugă din Tankbuch.</p>'}`;
+
+      const range = $view.querySelector('#fuelRange');
+      if (range) range.addEventListener('change', () => { fuelRange = range.value; paint(); });
+      $view.querySelectorAll('[data-fphoto]').forEach((b) =>
+        b.addEventListener('click', () => showPhoto('receipts', b.dataset.fphoto)));
+      $view.querySelectorAll('[data-fdel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Ștergi această alimentare? Acțiunea nu poate fi anulată.')) return;
+        const { error } = await sb.from('fuel_logs').delete().eq('id', b.dataset.fdel);
         if (error) return alert('Nu am putut șterge: ' + error.message);
         reload();
       }));
