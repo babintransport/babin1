@@ -35,6 +35,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
   <script src="config.js"></script>
   <script src="admin.js"></script>
+  <script src="employee.js"></script>
 
   <style>
     html, body { height: 100%; }
@@ -310,9 +311,8 @@
       hide($('appHeader')); hide($('appPlaceholder')); show($('adminRoot'));
       window.AdminPanel.mount({ sb, profile, root: $('adminRoot'), onLogout: doLogout });
     } else {
-      show($('appHeader')); show($('appPlaceholder')); hide($('adminRoot'));
-      $('roleLabel').textContent = 'Interfață angajat';
-      $('placeholderText').textContent = 'Autentificarea funcționează. Aici construim interfața pentru angajați la Pasul 3.';
+      hide($('appHeader')); hide($('appPlaceholder')); show($('adminRoot'));
+      window.EmployeePanel.mount({ sb, profile, root: $('adminRoot'), onLogout: doLogout });
     }
   }
 
