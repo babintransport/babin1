@@ -25,6 +25,7 @@
 
   function mount({ sb, profile, root, onLogout }) {
     let view = 'tasks';
+    let chatCleanup = null;
     let tasks = [], vehicles = [], logs = [], defects = [];
     let loading = true, loadError = '', notice = '', lastVehicle = '';
 
@@ -39,11 +40,12 @@
           <button data-logout class="text-sm bg-white/10 rounded-lg px-3 py-1.5 shrink-0">Deconectare</button>
         </header>
         <main id="empView" class="p-4 pb-24 max-w-xl mx-auto"></main>
-        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-3"
+        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-4"
              style="padding-bottom:env(safe-area-inset-bottom,0px)">
-          <button data-nav="tasks" class="tab-btn py-3 text-slate-500">Task-uri</button>
-          <button data-nav="fuel" class="tab-btn py-3 text-slate-500">Alimentări</button>
-          <button data-nav="defects" class="tab-btn py-3 text-slate-500">Defecțiuni</button>
+          <button data-nav="tasks" class="tab-btn py-3 text-sm text-slate-500">Task-uri</button>
+          <button data-nav="fuel" class="tab-btn py-3 text-sm text-slate-500">Alimentări</button>
+          <button data-nav="defects" class="tab-btn py-3 text-sm text-slate-500">Defecțiuni</button>
+          <button data-nav="chat" class="tab-btn py-3 text-sm text-slate-500">Chat</button>
         </nav>
       </div>`;
 
@@ -68,13 +70,15 @@
     }
 
     function paint() {
+      if (chatCleanup) { chatCleanup(); chatCleanup = null; }
       root.querySelectorAll('[data-nav]').forEach((b) =>
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
       if (view === 'tasks') paintTasks();
       else if (view === 'fuel') paintFuel();
-      else paintDefects();
+      else if (view === 'defects') paintDefects();
+      else chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: false });
     }
 
     // ---------- Task-urile mele ----------

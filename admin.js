@@ -64,7 +64,7 @@
   const navBtn = (id, label) =>
     `<button data-nav="${id}" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-white/10">${label}</button>`;
   const tabBtn = (id, label) =>
-    `<button data-nav="${id}" class="tab-btn py-3 text-xs text-slate-500">${label}</button>`;
+    `<button data-nav="${id}" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">${label}</button>`;
 
   const shell = (email) => `
     <style>
@@ -83,6 +83,7 @@
           ${navBtn('tasks', 'Task-uri')}
           ${navBtn('defects', 'Defecțiuni')}
           ${navBtn('fuel', 'Combustibil')}
+          ${navBtn('chat', 'Chat')}
           <div class="mt-4 mb-1 px-3 text-sm text-slate-400">În curând</div>
           ${SOON.map((s) => `<div class="px-3 py-1.5 text-slate-400">${s}</div>`).join('')}
         </nav>
@@ -100,13 +101,14 @@
         <main id="adminView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-5xl"></main>
       </div>
 
-      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-5"
+      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex overflow-x-auto"
            style="padding-bottom:env(safe-area-inset-bottom,0px)">
         ${tabBtn('alerts', 'Alerte')}
         ${tabBtn('vehicles', 'Vehicule')}
         ${tabBtn('tasks', 'Task-uri')}
         ${tabBtn('defects', 'Defecțiuni')}
         ${tabBtn('fuel', 'Combustibil')}
+        ${tabBtn('chat', 'Chat')}
       </nav>
     </div>`;
 
@@ -115,6 +117,7 @@
     let vehicles = [], tasks = [], people = [], defects = [], fuel = [];
     let view = 'alerts';
     let fuelRange = 'all';
+    let chatCleanup = null;
     let loading = true;
     let loadError = '';
 
@@ -142,6 +145,7 @@
     }
 
     function paint() {
+      if (chatCleanup) { chatCleanup(); chatCleanup = null; }
       root.querySelectorAll('[data-nav]').forEach((b) =>
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
@@ -150,7 +154,8 @@
       else if (view === 'vehicles') paintVehicles();
       else if (view === 'tasks') paintTasks();
       else if (view === 'defects') paintDefects();
-      else paintFuel();
+      else if (view === 'fuel') paintFuel();
+      else chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: true });
     }
 
     const emptyState = () => `
