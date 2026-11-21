@@ -14,7 +14,7 @@
   const LEVEL = { red: 0, yellow: 1, green: 2, none: 3 };
   const DOT = { red: 'bg-signal-red', yellow: 'bg-signal-yellow', green: 'bg-signal-green', none: 'bg-slate-300' };
   const TIRE = { vara: 'Vară', iarna: 'Iarnă', 'all-season': 'All-season' };
-  const SOON = ['Istoric șoferi', 'Hartă live'];
+  const SOON = ['Hartă live'];
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nf = (n) => Number(n).toLocaleString('de-DE');
@@ -84,6 +84,7 @@
           ${navBtn('defects', 'Defecțiuni')}
           ${navBtn('fuel', 'Combustibil')}
           ${navBtn('chat', 'Chat')}
+          ${navBtn('drivers', 'Istoric șoferi')}
           <div class="mt-4 mb-1 px-3 text-sm text-slate-400">În curând</div>
           ${SOON.map((s) => `<div class="px-3 py-1.5 text-slate-400">${s}</div>`).join('')}
         </nav>
@@ -109,15 +110,17 @@
         ${tabBtn('defects', 'Defecțiuni')}
         ${tabBtn('fuel', 'Combustibil')}
         ${tabBtn('chat', 'Chat')}
+        ${tabBtn('drivers', 'Șoferi')}
       </nav>
     </div>`;
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
-    let vehicles = [], tasks = [], people = [], defects = [], fuel = [];
+    let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [];
     let view = 'alerts';
     let fuelRange = 'all';
     let chatCleanup = null;
+    let histVehicle = '', histDriver = '', lookup = { vid: '', t: '' };
     let loading = true;
     let loadError = '';
 
@@ -130,17 +133,18 @@
 
     async function reload() {
       loading = true; paint();
-      const [v, t, u, d, f] = await Promise.all([
+      const [v, t, u, d, f, h] = await Promise.all([
         sb.from('vehicles').select('*').order('plate_number'),
         sb.from('tasks').select('*').order('created_at', { ascending: false }),
         sb.from('users').select('id, email, role').order('email'),
         sb.from('defects').select('*').order('created_at', { ascending: false }),
-        sb.from('fuel_logs').select('*').order('created_at', { ascending: false }).limit(2000)
+        sb.from('fuel_logs').select('*').order('created_at', { ascending: false }).limit(2000),
+        sb.from('driver_history').select('*').order('start_time', { ascending: false }).limit(2000)
       ]);
       loading = false;
-      const err = v.error || t.error || u.error || d.error || f.error;
+      const err = v.error || t.error || u.error || d.error || f.error || h.error;
       loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
-      vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || []; fuel = f.data || [];
+      vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || []; fuel = f.data || []; drives = h.data || [];
       paint();
     }
 
@@ -155,7 +159,8 @@
       else if (view === 'tasks') paintTasks();
       else if (view === 'defects') paintDefects();
       else if (view === 'fuel') paintFuel();
-      else chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: true });
+      else if (view === 'chat') chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: true });
+      else paintHistory();
     }
 
     const emptyState = () => `
@@ -653,6 +658,186 @@
         if (error) return alert('Nu am putut șterge: ' + error.message);
         reload();
       }));
+    }
+
+    // ----- Istoric șoferi -----
+    const fmtDT = (d) => new Date(d).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const ms = (d) => new Date(d).getTime();
+    const range = (h) => `${fmtDT(h.start_time)} → ${h.end_time ? fmtDT(h.end_time) : 'în curs'}`;
+    const toLocalInput = (iso) => {
+      if (!iso) return '';
+      const d = new Date(iso), p = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+    };
+    const vehicleOptions = (sel, all) => (all ? '<option value="">Toate vehiculele</option>' : '<option value="">Alege vehiculul</option>') +
+      vehicles.map((v) => `<option value="${v.id}" ${v.id === sel ? 'selected' : ''}>${esc(v.plate_number)}${v.model ? ' – ' + esc(v.model) : ''}</option>`).join('');
+
+    function lookupHtml() {
+      if (!lookup.vid || !lookup.t) return '';
+      const t = ms(lookup.t);
+      const hits = drives.filter((h) => h.vehicle_id === lookup.vid && ms(h.start_time) <= t && (!h.end_time || ms(h.end_time) >= t));
+      if (!hits.length) {
+        return `<p class="mt-3 text-sm rounded-lg bg-yellow-50 text-slate-700 px-3 py-2">Nicio înregistrare pentru ${esc(plateOf(lookup.vid))} la ${fmtDT(lookup.t)}. Verifică dacă istoricul este completat.</p>`;
+      }
+      return hits.map((h) => `
+        <div class="mt-3 rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm">
+          <div class="font-semibold text-navy-900">${esc(emailOf(h.user_id))}</div>
+          <div class="text-slate-600">${range(h)}</div>
+          ${h.notes ? `<div class="text-slate-500 mt-1">${esc(h.notes)}</div>` : ''}
+        </div>`).join('') +
+        (hits.length > 1 ? '<p class="mt-2 text-sm text-signal-red">Atenție: mai multe înregistrări se suprapun în acel moment.</p>' : '');
+    }
+
+    function paintHistory() {
+      const rows = drives
+        .filter((h) => (!histVehicle || h.vehicle_id === histVehicle) && (!histDriver || h.user_id === histDriver))
+        .slice(0, 100);
+
+      $view.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+          <h1 class="text-2xl font-semibold text-navy-900">Istoric șoferi</h1>
+          <button data-hadd class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă</button>
+        </div>
+
+        <section class="mt-5 bg-white rounded-xl border border-slate-200 p-4">
+          <h2 class="font-semibold text-navy-900">Cine conducea?</h2>
+          <p class="text-sm text-slate-500">Pentru radare și amenzi: alege vehiculul și momentul din document.</p>
+          <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
+            <select id="lkVeh" class="field rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${vehicleOptions(lookup.vid, false)}</select>
+            <input id="lkTime" type="datetime-local" value="${esc(lookup.t)}" class="field rounded-lg border border-slate-300 px-3 py-2.5">
+            <button id="lkGo" class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2.5">Caută</button>
+          </div>
+          <div id="lkResult">${lookupHtml()}</div>
+        </section>
+
+        <div class="mt-6 flex flex-wrap items-center gap-2">
+          <select id="fVeh" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">${vehicleOptions(histVehicle, true)}</select>
+          <select id="fDrv" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            <option value="">Toți șoferii</option>
+            ${people.map((p) => `<option value="${p.id}" ${p.id === histDriver ? 'selected' : ''}>${esc(p.email)}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="mt-4 space-y-3">
+          ${rows.length ? rows.map((h) => `
+            <article class="bg-white rounded-xl border border-slate-200 p-4">
+              <div class="flex items-start gap-3">
+                <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${h.end_time ? 'bg-slate-300' : DOT.green}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline gap-x-2">
+                    <h3 class="font-semibold text-navy-900">${esc(plateOf(h.vehicle_id))}</h3>
+                    <span class="text-slate-600 truncate">${esc(emailOf(h.user_id))}</span>
+                  </div>
+                  <p class="text-sm text-slate-500">${range(h)}</p>
+                  ${h.notes ? `<p class="mt-1 text-sm text-slate-700 break-words">${esc(h.notes)}</p>` : ''}
+                </div>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                ${h.end_time ? '' : `<button data-hend="${h.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Încheie acum</button>`}
+                <button data-hedit="${h.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Editează</button>
+                <button data-hdel="${h.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+              </div>
+            </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nicio înregistrare. Adaugă prima preluare de vehicul.</p>'}
+        </div>`;
+
+      $view.querySelector('[data-hadd]').addEventListener('click', () => openDriveForm(null));
+      $view.querySelector('#fVeh').addEventListener('change', (e) => { histVehicle = e.target.value; paint(); });
+      $view.querySelector('#fDrv').addEventListener('change', (e) => { histDriver = e.target.value; paint(); });
+      $view.querySelector('#lkGo').addEventListener('click', () => {
+        lookup = { vid: $view.querySelector('#lkVeh').value, t: $view.querySelector('#lkTime').value };
+        $view.querySelector('#lkResult').innerHTML = lookup.vid && lookup.t
+          ? lookupHtml()
+          : '<p class="mt-3 text-sm text-signal-red">Alege vehiculul și momentul.</p>';
+      });
+      $view.querySelectorAll('[data-hedit]').forEach((b) =>
+        b.addEventListener('click', () => openDriveForm(drives.find((x) => x.id === b.dataset.hedit))));
+      $view.querySelectorAll('[data-hdel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Ștergi această înregistrare? Acțiunea nu poate fi anulată.')) return;
+        const { error } = await sb.from('driver_history').delete().eq('id', b.dataset.hdel);
+        if (error) return alert('Nu am putut șterge: ' + error.message);
+        reload();
+      }));
+      $view.querySelectorAll('[data-hend]').forEach((b) => b.addEventListener('click', async () => {
+        const h = drives.find((x) => x.id === b.dataset.hend);
+        if (!h) return;
+        if (ms(h.start_time) > Date.now()) return alert('Preluarea începe în viitor. Editeaz-o pentru a seta sfârșitul.');
+        const { error } = await sb.from('driver_history').update({ end_time: new Date().toISOString() }).eq('id', h.id);
+        if (error) return alert('Nu am putut încheia: ' + error.message);
+        reload();
+      }));
+    }
+
+    function openDriveForm(h) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 z-50 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6';
+      modal.innerHTML = `
+        <form class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 md:p-6 max-h-[92vh] overflow-y-auto" novalidate>
+          <h2 class="text-xl font-semibold text-navy-900">${h ? 'Editează înregistrarea' : 'Preluare vehicul'}</h2>
+          <div class="mt-4 space-y-4">
+            <label class="block"><span class="block text-sm font-medium mb-1">Vehicul</span>
+              <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${vehicleOptions(h ? h.vehicle_id : '', false)}</select></label>
+            <label class="block"><span class="block text-sm font-medium mb-1">Șofer</span>
+              <select name="driver" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+                <option value="">Alege șoferul</option>
+                ${people.map((p) => `<option value="${p.id}" ${h && h.user_id === p.id ? 'selected' : ''}>${esc(p.email)}</option>`).join('')}
+              </select></label>
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label class="block"><span class="block text-sm font-medium mb-1">Început</span>
+                <input name="start" type="datetime-local" value="${toLocalInput(h ? h.start_time : new Date().toISOString())}" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></label>
+              <label class="block"><span class="block text-sm font-medium mb-1">Sfârșit (gol = în curs)</span>
+                <input name="end" type="datetime-local" value="${toLocalInput(h ? h.end_time : '')}" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></label>
+            </div>
+            <label class="block"><span class="block text-sm font-medium mb-1">Notițe</span>
+              <textarea name="notes" rows="2" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5">${h ? esc(h.notes || '') : ''}</textarea></label>
+          </div>
+          <p class="err hidden mt-4 text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" data-cancel class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Anulează</button>
+            <button type="submit" class="px-4 py-2 rounded-lg bg-navy-900 hover:bg-navy-800 text-white disabled:opacity-60">Salvează</button>
+          </div>
+        </form>`;
+      root.appendChild(modal);
+
+      const form = modal.querySelector('form');
+      const err = modal.querySelector('.err');
+      const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', onKey);
+      modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+      modal.querySelector('[data-cancel]').addEventListener('click', close);
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.classList.add('hidden');
+        const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+        if (!form.vehicle.value) return fail('Alege vehiculul.');
+        if (!form.driver.value) return fail('Alege șoferul.');
+        if (!form.start.value) return fail('Completează începutul.');
+
+        const payload = {
+          vehicle_id: form.vehicle.value,
+          user_id: form.driver.value,
+          start_time: new Date(form.start.value).toISOString(),
+          end_time: form.end.value ? new Date(form.end.value).toISOString() : null,
+          notes: form.notes.value.trim() || null
+        };
+        if (payload.end_time && ms(payload.end_time) <= ms(payload.start_time)) return fail('Sfârșitul trebuie să fie după început.');
+
+        const s0 = ms(payload.start_time), e0 = payload.end_time ? ms(payload.end_time) : Infinity;
+        const clash = drives.find((x) => (!h || x.id !== h.id) && x.vehicle_id === payload.vehicle_id &&
+          s0 < (x.end_time ? ms(x.end_time) : Infinity) && ms(x.start_time) < e0);
+        if (clash && !confirm(`Se suprapune cu altă înregistrare (${emailOf(clash.user_id)}, ${range(clash)}). Salvezi oricum?`)) return;
+
+        const btn = form.querySelector('[type="submit"]');
+        btn.disabled = true;
+        const { error } = h
+          ? await sb.from('driver_history').update(payload).eq('id', h.id)
+          : await sb.from('driver_history').insert(payload);
+        btn.disabled = false;
+        if (error) return fail('Nu am putut salva: ' + error.message);
+        close();
+        reload();
+      });
     }
 
     reload();
