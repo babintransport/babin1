@@ -4,17 +4,19 @@
   const RULES = {
     tuvRedDays: 14,          // TÜV: roșu dacă expiră în maximum 14 zile (sau a expirat)
     tuvYellowDays: 60,       // galben dacă expiră în maximum 60 de zile
-    oilIntervalKm: 15000,    // interval între schimburile de ulei
+    oilIntervalKm: 10000,    // interval între schimburile de ulei
     oilYellowKm: 1500,       // galben când mai sunt sub 1.500 km
     treadRedMm: 1.6,         // limita legală în Germania
     treadYellowSummerMm: 3,  // recomandare vară / all-season
     treadYellowWinterMm: 4   // recomandare iarnă
   };
 
+  // Harta PAJ rămâne ascunsă până setezi ENABLE_MAP: true în config.js
+  const MAP_ON = !!(window.APP_CONFIG && window.APP_CONFIG.ENABLE_MAP);
+
   const LEVEL = { red: 0, yellow: 1, green: 2, none: 3 };
   const DOT = { red: 'bg-signal-red', yellow: 'bg-signal-yellow', green: 'bg-signal-green', none: 'bg-slate-300' };
   const TIRE = { vara: 'Vară', iarna: 'Iarnă', 'all-season': 'All-season' };
-  const SOON = ['Hartă live'];
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nf = (n) => Number(n).toLocaleString('de-DE');
@@ -85,8 +87,7 @@
           ${navBtn('fuel', 'Combustibil')}
           ${navBtn('chat', 'Chat')}
           ${navBtn('drivers', 'Istoric șoferi')}
-          <div class="mt-4 mb-1 px-3 text-sm text-slate-400">În curând</div>
-          ${SOON.map((s) => `<div class="px-3 py-1.5 text-slate-400">${s}</div>`).join('')}
+          ${MAP_ON ? navBtn('map', 'Hartă live') : ''}
         </nav>
         <div class="mt-auto text-sm">
           <div class="text-slate-300 truncate">${esc(email)}</div>
@@ -111,6 +112,7 @@
         ${tabBtn('fuel', 'Combustibil')}
         ${tabBtn('chat', 'Chat')}
         ${tabBtn('drivers', 'Șoferi')}
+        ${MAP_ON ? tabBtn('map', 'Hartă') : ''}
       </nav>
     </div>`;
 
@@ -160,7 +162,8 @@
       else if (view === 'defects') paintDefects();
       else if (view === 'fuel') paintFuel();
       else if (view === 'chat') chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: true });
-      else paintHistory();
+      else if (view === 'drivers') paintHistory();
+      else chatCleanup = paintMap();
     }
 
     const emptyState = () => `
@@ -838,6 +841,160 @@
         close();
         reload();
       });
+    }
+
+    // ----- Hartă live (PAJ GPS) -----
+    const LEAFLET_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/';
+    const PIN = { red: '#D64545', yellow: '#E5B100', green: '#2E9E5B', none: '#13315C' };
+
+    function loadLeaflet() {
+      if (window.L) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const css = document.createElement('link');
+        css.rel = 'stylesheet'; css.href = LEAFLET_CDN + 'leaflet.css';
+        document.head.appendChild(css);
+        const js = document.createElement('script');
+        js.src = LEAFLET_CDN + 'leaflet.js';
+        js.onload = resolve;
+        js.onerror = () => reject(new Error('Nu am putut încărca biblioteca hărții.'));
+        document.head.appendChild(js);
+      });
+    }
+
+    function posTime(p) {
+      const n = p.dateunix ?? p.date_unix ?? p.timestamp;
+      if (typeof n === 'number') return new Date(n < 1e12 ? n * 1000 : n);
+      const s = p.created_at ?? p.date ?? p.datetime;
+      const d = s ? new Date(s) : null;
+      return d && !isNaN(d) ? d : null;
+    }
+
+    function paintMap() {
+      $view.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+          <h1 class="text-2xl font-semibold text-navy-900">Hartă live</h1>
+          <button id="mapRefresh" class="text-sm px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Reîmprospătează</button>
+        </div>
+        <p id="mapStatus" class="mt-1 text-sm text-slate-500">Se încarcă harta…</p>
+        <div id="liveMap" class="mt-4 rounded-xl border border-slate-200 overflow-hidden bg-slate-100" style="height:55vh;min-height:320px"></div>
+        <div id="mapList" class="mt-4 space-y-2"></div>
+        <div id="mapDevices" class="mt-6"></div>`;
+
+      const $status = $view.querySelector('#mapStatus');
+      const $list = $view.querySelector('#mapList');
+      const $devices = $view.querySelector('#mapDevices');
+      let map = null, timer = null, dead = false, fitted = false;
+      const markers = {};
+
+      const icon = (color) => L.divIcon({
+        className: '',
+        html: `<div style="width:20px;height:20px;border-radius:50%;background:${color};border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.45)"></div>`,
+        iconSize: [20, 20], iconAnchor: [10, 10], popupAnchor: [0, -10]
+      });
+
+      const vehicleFor = (dev) => vehicles.find((v) => v.paj_device_id &&
+        [String(dev.id), String(dev.imei || '')].includes(String(v.paj_device_id).trim()));
+
+      function draw(body) {
+        const devices = body.devices || [], positions = body.positions || [];
+        const devById = {};
+        devices.forEach((d) => { devById[String(d.id)] = d; });
+        const bounds = [], rows = [], seen = new Set();
+
+        positions.forEach((p) => {
+          const lat = Number(p.lat), lng = Number(p.lng);
+          if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+          const key = String(p.iddevice);
+          const dev = devById[key] || { id: p.iddevice, name: 'Dispozitiv ' + p.iddevice };
+          const v = vehicleFor(dev);
+          const st = v ? statusOf(v) : null;
+          const color = PIN[st ? st.worst : 'none'];
+          const label = v ? v.plate_number : (dev.name || 'Dispozitiv ' + key);
+          const speed = Math.round(Number(p.speed) || 0);
+          const t = posTime(p);
+          const popup = `<strong>${esc(label)}</strong>${v && v.model ? '<br>' + esc(v.model) : ''}<br>${speed} km/h` +
+            (t ? '<br>' + esc(t.toLocaleString('de-DE')) : '') +
+            (st ? `<br>TÜV: ${esc(st.tuv.text)}<br>Ulei: ${esc(st.oil.text)}<br>Anvelope: ${esc(st.tire.text)}` : '');
+
+          seen.add(key);
+          if (markers[key]) {
+            markers[key].setLatLng([lat, lng]).setIcon(icon(color)).setPopupContent(popup);
+          } else {
+            markers[key] = L.marker([lat, lng], { icon: icon(color) }).addTo(map)
+              .bindPopup(popup)
+              .bindTooltip(esc(label), { permanent: true, direction: 'top', offset: [0, -12] });
+          }
+          bounds.push([lat, lng]);
+          rows.push({ key, label, speed, t, lat, lng, color });
+        });
+        Object.keys(markers).forEach((k) => { if (!seen.has(k)) { map.removeLayer(markers[k]); delete markers[k]; } });
+        if (bounds.length && !fitted) { map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 }); fitted = true; }
+
+        const noId = vehicles.filter((v) => !v.paj_device_id).length;
+        $status.textContent = `Actualizat la ${new Date().toLocaleTimeString('de-DE')} · ${rows.length} pe hartă` +
+          (noId ? ` · ${noId} vehicule fără ID PAJ` : '');
+
+        $list.innerHTML = rows.map((r) => `
+          <button data-pin="${esc(r.key)}" class="w-full text-left bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm flex items-center gap-3 hover:bg-slate-50">
+            <span class="w-3 h-3 rounded-full shrink-0" style="background:${r.color}"></span>
+            <span class="font-medium text-navy-900">${esc(r.label)}</span>
+            <span class="text-slate-500">${r.speed} km/h</span>
+            <span class="ml-auto text-slate-400">${r.t ? esc(r.t.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })) : ''}</span>
+          </button>`).join('');
+        $list.querySelectorAll('[data-pin]').forEach((b) => b.addEventListener('click', () => {
+          const r = rows.find((x) => x.key === b.dataset.pin);
+          if (!r || !markers[r.key]) return;
+          map.setView([r.lat, r.lng], 16);
+          markers[r.key].openPopup();
+          window.scrollTo(0, 0);
+        }));
+
+        // dispozitivele PAJ și ID-urile lor (de copiat în Vehicule → ID dispozitiv PAJ)
+        $devices.innerHTML = `
+          <details class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+            <summary class="cursor-pointer font-medium text-slate-700">Dispozitive PAJ (${devices.length})</summary>
+            <div class="mt-3 space-y-1.5">
+              ${devices.map((d) => { const v = vehicleFor(d); return `
+                <div class="flex flex-wrap gap-x-3 text-slate-600">
+                  <span class="font-medium">${esc(d.name || 'fără nume')}</span>
+                  <span>ID: ${esc(d.id)}</span>
+                  <span>IMEI: ${esc(d.imei || '–')}</span>
+                  <span class="${v ? 'text-signal-green' : 'text-slate-400'}">${v ? 'legat de ' + esc(v.plate_number) : 'nelegat de vreun vehicul'}</span>
+                </div>`; }).join('') || '<p class="text-slate-400">Niciun dispozitiv returnat.</p>'}
+            </div>
+            <p class="mt-3 text-slate-400">Pentru a lega un dispozitiv de un vehicul, copiază ID-ul în Vehicule → Editează → ID dispozitiv PAJ.</p>
+            <details class="mt-3"><summary class="cursor-pointer text-slate-500">Detalii tehnice (pentru depanare)</summary>
+              <pre class="mt-2 p-2 bg-slate-50 rounded text-xs overflow-x-auto">${esc(JSON.stringify(body.sample || {}, null, 2))}</pre>
+            </details>
+          </details>`;
+      }
+
+      async function refresh() {
+        if (!map || dead) return;
+        $status.textContent = 'Se actualizează…';
+        try {
+          const { data: { session } } = await sb.auth.getSession();
+          const r = await fetch('/api/paj-positions', { headers: { Authorization: 'Bearer ' + (session ? session.access_token : '') } });
+          if (r.status === 404) throw new Error('Harta funcționează doar pe adresa publicată pe Vercel, nu local.');
+          const body = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error((body.error || 'Eroare ' + r.status) + (body.detail ? ' [' + body.detail + ']' : ''));
+          if (!dead) draw(body);
+        } catch (e) {
+          if (!dead) $status.innerHTML = `<span class="text-signal-red break-words">${esc(e.message)}</span>`;
+        }
+      }
+
+      $view.querySelector('#mapRefresh').addEventListener('click', refresh);
+
+      loadLeaflet().then(() => {
+        if (dead) return;
+        map = L.map('liveMap').setView([51.1657, 10.4515], 6);
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(map);
+        refresh();
+        timer = setInterval(() => { if (!document.hidden) refresh(); }, 30000);
+      }).catch((e) => { $status.innerHTML = `<span class="text-signal-red">${esc(e.message)}</span>`; });
+
+      return () => { dead = true; clearInterval(timer); if (map) map.remove(); };
     }
 
     reload();
