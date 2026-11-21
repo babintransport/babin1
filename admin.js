@@ -14,7 +14,7 @@
   const LEVEL = { red: 0, yellow: 1, green: 2, none: 3 };
   const DOT = { red: 'bg-signal-red', yellow: 'bg-signal-yellow', green: 'bg-signal-green', none: 'bg-slate-300' };
   const TIRE = { vara: 'Vară', iarna: 'Iarnă', 'all-season': 'All-season' };
-  const SOON = ['Task-uri', 'Combustibil', 'Defecțiuni', 'Istoric șoferi', 'Hartă live'];
+  const SOON = ['Combustibil', 'Defecțiuni', 'Istoric șoferi', 'Hartă live'];
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nf = (n) => Number(n).toLocaleString('de-DE');
@@ -80,6 +80,7 @@
         <nav class="flex flex-col gap-1">
           ${navBtn('alerts', 'Centru de alerte')}
           ${navBtn('vehicles', 'Vehicule')}
+          ${navBtn('tasks', 'Task-uri')}
           <div class="mt-4 mb-1 px-3 text-sm text-slate-400">În curând</div>
           ${SOON.map((s) => `<div class="px-3 py-1.5 text-slate-400">${s}</div>`).join('')}
         </nav>
@@ -97,16 +98,17 @@
         <main id="adminView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-5xl"></main>
       </div>
 
-      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-2"
+      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-3"
            style="padding-bottom:env(safe-area-inset-bottom,0px)">
         ${tabBtn('alerts', 'Alerte')}
         ${tabBtn('vehicles', 'Vehicule')}
+        ${tabBtn('tasks', 'Task-uri')}
       </nav>
     </div>`;
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
-    let vehicles = [];
+    let vehicles = [], tasks = [], people = [];
     let view = 'alerts';
     let loading = true;
     let loadError = '';
@@ -120,10 +122,15 @@
 
     async function reload() {
       loading = true; paint();
-      const { data, error } = await sb.from('vehicles').select('*').order('plate_number');
+      const [v, t, u] = await Promise.all([
+        sb.from('vehicles').select('*').order('plate_number'),
+        sb.from('tasks').select('*').order('created_at', { ascending: false }),
+        sb.from('users').select('id, email, role').order('email')
+      ]);
       loading = false;
-      loadError = error ? 'Nu am putut încărca vehiculele: ' + error.message : '';
-      vehicles = data || [];
+      const err = v.error || t.error || u.error;
+      loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
+      vehicles = v.data || []; tasks = t.data || []; people = u.data || [];
       paint();
     }
 
@@ -132,7 +139,9 @@
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
-      view === 'alerts' ? paintAlerts() : paintVehicles();
+      if (view === 'alerts') paintAlerts();
+      else if (view === 'vehicles') paintVehicles();
+      else paintTasks();
     }
 
     const emptyState = () => `
@@ -305,6 +314,127 @@
         btn.disabled = false;
 
         if (error) return fail(error.code === '23505' ? 'Există deja un vehicul cu acest număr.' : 'Nu am putut salva: ' + error.message);
+        close();
+        reload();
+      });
+    }
+
+    // ----- Task-uri -----
+    const T_STATUS = { open: 'De făcut', in_progress: 'În lucru', done: 'Finalizat' };
+    const T_DOT = { open: 'bg-slate-400', in_progress: DOT.yellow, done: DOT.green };
+    const who = (id) => (people.find((p) => p.id === id) || {}).email || 'Neatribuit';
+    const statusOptions = (cur) => Object.entries(T_STATUS)
+      .map(([k, l]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${l}</option>`).join('');
+
+    function paintTasks() {
+      const col = (st) => {
+        const items = tasks.filter((t) => t.status === st);
+        return `
+          <section>
+            <h2 class="flex items-center gap-2 font-semibold text-navy-900 mb-3">
+              <span class="w-3 h-3 rounded-full ${T_DOT[st]}"></span>${T_STATUS[st]}
+              <span class="text-slate-400 font-normal">${items.length}</span>
+            </h2>
+            <div class="space-y-3">
+              ${items.map((t) => `
+                <article class="bg-white rounded-xl border border-slate-200 p-3">
+                  <p class="font-medium text-slate-800 break-words">${esc(t.title)}</p>
+                  <p class="text-sm text-slate-500 mt-0.5 truncate">${esc(who(t.assigned_to))}</p>
+                  <div class="mt-3 flex items-center gap-2">
+                    <select data-tstatus="${t.id}" class="field flex-1 min-w-0 text-sm rounded-lg border border-slate-300 px-2 py-1.5 bg-white">${statusOptions(t.status)}</select>
+                    <button data-tedit="${t.id}" class="text-sm px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Editează</button>
+                    <button data-tdel="${t.id}" class="text-sm px-2.5 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+                  </div>
+                </article>`).join('') || '<p class="text-sm text-slate-400">Niciun task.</p>'}
+            </div>
+          </section>`;
+      };
+
+      $view.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+          <h1 class="text-2xl font-semibold text-navy-900">Task-uri</h1>
+          <button data-tadd class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă task</button>
+        </div>
+        <div class="mt-5 grid gap-6 md:grid-cols-3">${col('open')}${col('in_progress')}${col('done')}</div>`;
+
+      $view.querySelector('[data-tadd]').addEventListener('click', () => openTaskForm(null));
+      $view.querySelectorAll('[data-tedit]').forEach((b) =>
+        b.addEventListener('click', () => openTaskForm(tasks.find((t) => t.id === b.dataset.tedit))));
+      $view.querySelectorAll('[data-tdel]').forEach((b) =>
+        b.addEventListener('click', async () => {
+          const t = tasks.find((x) => x.id === b.dataset.tdel);
+          if (!t || !confirm(`Ștergi task-ul „${t.title}"?`)) return;
+          const { error } = await sb.from('tasks').delete().eq('id', t.id);
+          if (error) return alert('Nu am putut șterge: ' + error.message);
+          reload();
+        }));
+      $view.querySelectorAll('[data-tstatus]').forEach((sel) =>
+        sel.addEventListener('change', async () => {
+          const t = tasks.find((x) => x.id === sel.dataset.tstatus);
+          const { error } = await sb.from('tasks').update({ status: sel.value }).eq('id', sel.dataset.tstatus);
+          if (error) alert('Nu am putut schimba starea: ' + error.message);
+          else if (t) t.status = sel.value;
+          paint();
+        }));
+    }
+
+    function openTaskForm(t) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 z-50 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6';
+      modal.innerHTML = `
+        <form class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 md:p-6 max-h-[92vh] overflow-y-auto" novalidate>
+          <h2 class="text-xl font-semibold text-navy-900">${t ? 'Editează task-ul' : 'Task nou'}</h2>
+          <div class="mt-4 space-y-4">
+            <label class="block">
+              <span class="block text-sm font-medium mb-1">Ce trebuie făcut</span>
+              <textarea name="title" rows="3" required class="field w-full rounded-lg border border-slate-300 px-3 py-2.5">${t ? esc(t.title) : ''}</textarea>
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium mb-1">Atribuit lui</span>
+              <select name="assigned_to" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+                <option value="">Neatribuit</option>
+                ${people.map((p) => `<option value="${p.id}" ${t && t.assigned_to === p.id ? 'selected' : ''}>${esc(p.email)}${p.role === 'admin' ? ' (admin)' : ''}</option>`).join('')}
+              </select>
+            </label>
+            <label class="block">
+              <span class="block text-sm font-medium mb-1">Stare</span>
+              <select name="status" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${statusOptions(t ? t.status : 'open')}</select>
+            </label>
+          </div>
+          <p class="err hidden mt-4 text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" data-cancel class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Anulează</button>
+            <button type="submit" class="px-4 py-2 rounded-lg bg-navy-900 hover:bg-navy-800 text-white disabled:opacity-60">Salvează</button>
+          </div>
+        </form>`;
+      root.appendChild(modal);
+
+      const form = modal.querySelector('form');
+      const err = modal.querySelector('.err');
+      const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', onKey);
+      modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+      modal.querySelector('[data-cancel]').addEventListener('click', close);
+      form.title.focus();
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.classList.add('hidden');
+        const payload = {
+          title: form.title.value.trim(),
+          assigned_to: form.assigned_to.value || null,
+          status: form.status.value
+        };
+        if (!payload.title) { err.textContent = 'Scrie ce trebuie făcut.'; err.classList.remove('hidden'); return; }
+
+        const btn = form.querySelector('[type="submit"]');
+        btn.disabled = true;
+        const { error } = t
+          ? await sb.from('tasks').update(payload).eq('id', t.id)
+          : await sb.from('tasks').insert(payload);
+        btn.disabled = false;
+        if (error) { err.textContent = 'Nu am putut salva: ' + error.message; err.classList.remove('hidden'); return; }
         close();
         reload();
       });
