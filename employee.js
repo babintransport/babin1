@@ -50,7 +50,15 @@
       </div>`;
 
     const $view = root.querySelector('#empView');
-    root.querySelector('[data-logout]').addEventListener('click', onLogout);
+    root.querySelector('[data-logout]').addEventListener('click', () => {
+      window.ChatNotifier.stop();
+      onLogout();
+    });
+    window.ChatNotifier.start({
+      sb, profile, root,
+      isViewingChat: () => view === 'chat',
+      openChat: () => { view = 'chat'; notice = ''; paint(); }
+    });
     root.querySelectorAll('[data-nav]').forEach((b) =>
       b.addEventListener('click', () => { view = b.dataset.nav; notice = ''; paint(); window.scrollTo(0, 0); }));
 

@@ -131,7 +131,15 @@
 
     root.querySelectorAll('[data-nav]').forEach((b) =>
       b.addEventListener('click', () => { view = b.dataset.nav; paint(); window.scrollTo(0, 0); }));
-    root.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', onLogout));
+    root.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', () => {
+      window.ChatNotifier.stop();
+      onLogout();
+    }));
+    window.ChatNotifier.start({
+      sb, profile, root,
+      isViewingChat: () => view === 'chat',
+      openChat: () => { view = 'chat'; paint(); }
+    });
 
     async function reload() {
       loading = true; paint();
