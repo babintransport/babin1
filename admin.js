@@ -14,7 +14,7 @@
   const LEVEL = { red: 0, yellow: 1, green: 2, none: 3 };
   const DOT = { red: 'bg-signal-red', yellow: 'bg-signal-yellow', green: 'bg-signal-green', none: 'bg-slate-300' };
   const TIRE = { vara: 'Vară', iarna: 'Iarnă', 'all-season': 'All-season' };
-  const SOON = ['Combustibil', 'Defecțiuni', 'Istoric șoferi', 'Hartă live'];
+  const SOON = ['Combustibil', 'Istoric șoferi', 'Hartă live'];
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const nf = (n) => Number(n).toLocaleString('de-DE');
@@ -81,6 +81,7 @@
           ${navBtn('alerts', 'Centru de alerte')}
           ${navBtn('vehicles', 'Vehicule')}
           ${navBtn('tasks', 'Task-uri')}
+          ${navBtn('defects', 'Defecțiuni')}
           <div class="mt-4 mb-1 px-3 text-sm text-slate-400">În curând</div>
           ${SOON.map((s) => `<div class="px-3 py-1.5 text-slate-400">${s}</div>`).join('')}
         </nav>
@@ -98,17 +99,18 @@
         <main id="adminView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-5xl"></main>
       </div>
 
-      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-3"
+      <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-4"
            style="padding-bottom:env(safe-area-inset-bottom,0px)">
         ${tabBtn('alerts', 'Alerte')}
         ${tabBtn('vehicles', 'Vehicule')}
         ${tabBtn('tasks', 'Task-uri')}
+        ${tabBtn('defects', 'Defecțiuni')}
       </nav>
     </div>`;
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
-    let vehicles = [], tasks = [], people = [];
+    let vehicles = [], tasks = [], people = [], defects = [];
     let view = 'alerts';
     let loading = true;
     let loadError = '';
@@ -122,15 +124,16 @@
 
     async function reload() {
       loading = true; paint();
-      const [v, t, u] = await Promise.all([
+      const [v, t, u, d] = await Promise.all([
         sb.from('vehicles').select('*').order('plate_number'),
         sb.from('tasks').select('*').order('created_at', { ascending: false }),
-        sb.from('users').select('id, email, role').order('email')
+        sb.from('users').select('id, email, role').order('email'),
+        sb.from('defects').select('*').order('created_at', { ascending: false })
       ]);
       loading = false;
-      const err = v.error || t.error || u.error;
+      const err = v.error || t.error || u.error || d.error;
       loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
-      vehicles = v.data || []; tasks = t.data || []; people = u.data || [];
+      vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || [];
       paint();
     }
 
@@ -141,7 +144,8 @@
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
       if (view === 'alerts') paintAlerts();
       else if (view === 'vehicles') paintVehicles();
-      else paintTasks();
+      else if (view === 'tasks') paintTasks();
+      else paintDefects();
     }
 
     const emptyState = () => `
@@ -438,6 +442,90 @@
         close();
         reload();
       });
+    }
+
+    // ----- Defecțiuni (Mängelmelder) -----
+    const D_STATUS = { new: 'Nou', in_progress: 'În lucru', resolved: 'Rezolvat' };
+    const D_DOT = { new: DOT.red, in_progress: DOT.yellow, resolved: DOT.green };
+    const D_ORDER = { new: 0, in_progress: 1, resolved: 2 };
+    const plateOf = (id) => (vehicles.find((x) => x.id === id) || {}).plate_number || '–';
+    const emailOf = (id) => (people.find((p) => p.id === id) || {}).email || 'necunoscut';
+    const fmtTs = (d) => new Date(d).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+    // Afișează o poză privată din Storage, într-o fereastră peste pagină
+    function showPhoto(bucket, path) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 z-50 bg-slate-900/80 flex items-center justify-center p-4';
+      modal.innerHTML = `
+        <div class="relative max-w-3xl w-full">
+          <button data-close class="absolute -top-11 right-0 text-white text-sm bg-white/15 rounded-lg px-3 py-1.5">Închide</button>
+          <p class="text-white text-center">Se încarcă poza…</p>
+        </div>`;
+      root.appendChild(modal);
+      const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', onKey);
+      modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+      modal.querySelector('[data-close]').addEventListener('click', close);
+      sb.storage.from(bucket).createSignedUrl(path, 300).then(({ data, error }) => {
+        const p = modal.querySelector('p');
+        if (!p) return;
+        if (error || !data) { p.textContent = 'Nu am putut încărca poza.'; return; }
+        const img = new Image();
+        img.src = data.signedUrl; img.alt = 'Poză';
+        img.className = 'max-h-[80vh] mx-auto rounded-lg';
+        p.replaceWith(img);
+      });
+    }
+
+    function paintDefects() {
+      const rows = [...defects].sort((a, b) =>
+        D_ORDER[a.status] - D_ORDER[b.status] || new Date(b.created_at) - new Date(a.created_at));
+      const open = defects.filter((d) => d.status !== 'resolved').length;
+      const options = (cur) => Object.entries(D_STATUS)
+        .map(([k, l]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${l}</option>`).join('');
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Defecțiuni</h1>
+        <p class="text-slate-500 mt-1">${open ? open + ' nerezolvate' : 'Nicio defecțiune nerezolvată.'}</p>
+        <div class="mt-5 space-y-3">
+          ${rows.length ? rows.map((d) => `
+            <article class="bg-white rounded-xl border border-slate-200 p-4">
+              <div class="flex items-start gap-3">
+                <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${D_DOT[d.status]}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline gap-x-2">
+                    <h2 class="font-semibold text-navy-900">${esc(plateOf(d.vehicle_id))}</h2>
+                    <span class="text-slate-500">${esc(d.category || 'Fără categorie')}</span>
+                  </div>
+                  <p class="mt-1 text-slate-700 break-words">${esc(d.description)}</p>
+                  <p class="mt-1 text-sm text-slate-400">${esc(emailOf(d.reported_by))} · ${fmtTs(d.created_at)}</p>
+                </div>
+              </div>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <select data-dstatus="${d.id}" class="field text-sm rounded-lg border border-slate-300 px-2 py-1.5 bg-white">${options(d.status)}</select>
+                ${d.photo_url ? `<button data-dphoto="${esc(d.photo_url)}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Vezi poza</button>` : ''}
+                <button data-ddel="${d.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+              </div>
+            </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nu a fost raportată nicio defecțiune.</p>'}
+        </div>`;
+
+      $view.querySelectorAll('[data-dstatus]').forEach((sel) => sel.addEventListener('change', async () => {
+        const d = defects.find((x) => x.id === sel.dataset.dstatus);
+        const { error } = await sb.from('defects').update({ status: sel.value }).eq('id', sel.dataset.dstatus);
+        if (error) alert('Nu am putut schimba starea: ' + error.message);
+        else if (d) d.status = sel.value;
+        paint();
+      }));
+      $view.querySelectorAll('[data-dphoto]').forEach((b) =>
+        b.addEventListener('click', () => showPhoto('defect-photos', b.dataset.dphoto)));
+      $view.querySelectorAll('[data-ddel]').forEach((b) => b.addEventListener('click', async () => {
+        const d = defects.find((x) => x.id === b.dataset.ddel);
+        if (!d || !confirm('Ștergi această defecțiune? Acțiunea nu poate fi anulată.')) return;
+        const { error } = await sb.from('defects').delete().eq('id', d.id);
+        if (error) return alert('Nu am putut șterge: ' + error.message);
+        reload();
+      }));
     }
 
     reload();

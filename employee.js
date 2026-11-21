@@ -25,7 +25,7 @@
 
   function mount({ sb, profile, root, onLogout }) {
     let view = 'tasks';
-    let tasks = [], vehicles = [], logs = [];
+    let tasks = [], vehicles = [], logs = [], defects = [];
     let loading = true, loadError = '', notice = '', lastVehicle = '';
 
     root.innerHTML = `
@@ -39,10 +39,11 @@
           <button data-logout class="text-sm bg-white/10 rounded-lg px-3 py-1.5 shrink-0">Deconectare</button>
         </header>
         <main id="empView" class="p-4 pb-24 max-w-xl mx-auto"></main>
-        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-2"
+        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-3"
              style="padding-bottom:env(safe-area-inset-bottom,0px)">
           <button data-nav="tasks" class="tab-btn py-3 text-slate-500">Task-uri</button>
           <button data-nav="fuel" class="tab-btn py-3 text-slate-500">Alimentări</button>
+          <button data-nav="defects" class="tab-btn py-3 text-slate-500">Defecțiuni</button>
         </nav>
       </div>`;
 
@@ -53,15 +54,16 @@
 
     async function load(spinner = true) {
       if (spinner) { loading = true; paint(); }
-      const [t, v, l] = await Promise.all([
+      const [t, v, l, d] = await Promise.all([
         sb.from('tasks').select('*').eq('assigned_to', profile.id).order('created_at', { ascending: false }),
         sb.from('vehicles').select('id, plate_number, model, current_km').order('plate_number'),
-        sb.from('fuel_logs').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(20)
+        sb.from('fuel_logs').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(20),
+        sb.from('defects').select('*').eq('reported_by', profile.id).order('created_at', { ascending: false }).limit(20)
       ]);
       loading = false;
-      const err = t.error || v.error || l.error;
+      const err = t.error || v.error || l.error || d.error;
       loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
-      tasks = t.data || []; vehicles = v.data || []; logs = l.data || [];
+      tasks = t.data || []; vehicles = v.data || []; logs = l.data || []; defects = d.data || [];
       paint();
     }
 
@@ -70,7 +72,9 @@
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
-      view === 'tasks' ? paintTasks() : paintFuel();
+      if (view === 'tasks') paintTasks();
+      else if (view === 'fuel') paintFuel();
+      else paintDefects();
     }
 
     // ---------- Task-urile mele ----------
@@ -215,6 +219,98 @@
 
         lastVehicle = v.id;
         notice = 'Alimentarea a fost salvată.';
+        await load(false);
+      });
+    }
+
+    // ---------- Mängelmelder (raportare defecțiuni) ----------
+    const D_STATUS = { new: 'Nou', in_progress: 'În lucru', resolved: 'Rezolvat' };
+    const D_DOT = { new: 'bg-signal-red', in_progress: 'bg-signal-yellow', resolved: 'bg-signal-green' };
+    const CATS = ['Frâne', 'Motor', 'Anvelope', 'Lumini', 'Caroserie', 'Interior', 'Sistem electric', 'Altele'];
+
+    function paintDefects() {
+      const plate = (id) => (vehicles.find((v) => v.id === id) || {}).plate_number || '–';
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Raportează o defecțiune</h1>
+        ${notice ? `<p class="mt-3 text-sm rounded-lg bg-green-50 text-signal-green px-3 py-2">${esc(notice)}</p>` : ''}
+        ${vehicles.length ? `
+        <form id="defForm" class="mt-4 bg-white rounded-xl border border-slate-200 p-4 space-y-4" novalidate>
+          <label class="block">
+            <span class="block text-sm font-medium mb-1">Vehicul</span>
+            <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              <option value="">Alege vehiculul</option>
+              ${vehicles.map((v) => `<option value="${v.id}" ${v.id === lastVehicle ? 'selected' : ''}>${esc(v.plate_number)}${v.model ? ' – ' + esc(v.model) : ''}</option>`).join('')}
+            </select>
+          </label>
+          <label class="block">
+            <span class="block text-sm font-medium mb-1">Categorie</span>
+            <select name="category" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              ${CATS.map((c) => `<option value="${c}">${c}</option>`).join('')}
+            </select>
+          </label>
+          <label class="block">
+            <span class="block text-sm font-medium mb-1">Ce nu funcționează?</span>
+            <textarea name="description" rows="4" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"
+                      placeholder="Descrie problema: ce se întâmplă, când apare, cât de grav e"></textarea>
+          </label>
+          <label class="block">
+            <span class="block text-sm font-medium mb-1">Poză (opțional)</span>
+            <input name="photo" type="file" accept="image/*" capture="environment"
+                   class="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700">
+          </label>
+          <p id="defErr" class="hidden text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <button type="submit" class="w-full rounded-lg bg-navy-900 hover:bg-navy-800 text-white font-medium py-3 disabled:opacity-60">Trimite raportul</button>
+        </form>` : '<p class="mt-4 rounded-xl border border-dashed border-slate-300 p-6 text-center text-slate-500">Nu există vehicule. Cere administratorului să le adauge.</p>'}
+
+        <h2 class="mt-8 mb-3 font-semibold text-slate-600">Rapoartele mele</h2>
+        <div class="space-y-2">
+          ${defects.length ? defects.map((d) => `
+            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-navy-900">${esc(plate(d.vehicle_id))} · ${esc(d.category || '')}</span>
+                <span class="flex items-center gap-1.5 text-slate-600 shrink-0"><i class="w-2.5 h-2.5 rounded-full ${D_DOT[d.status]}"></i>${D_STATUS[d.status]}</span>
+              </div>
+              <p class="mt-1 text-slate-600 break-words">${esc(d.description)}</p>
+              <p class="mt-1 text-slate-400">${fmtDate(d.created_at)}${d.photo_url ? ' · poză atașată' : ''}</p>
+            </div>`).join('') : '<p class="text-sm text-slate-400">Nu ai raportat nicio defecțiune.</p>'}
+        </div>`;
+
+      const form = $view.querySelector('#defForm');
+      if (!form) return;
+      const err = $view.querySelector('#defErr');
+      const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+      form.vehicle.addEventListener('change', () => { lastVehicle = form.vehicle.value; });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.classList.add('hidden');
+        const v = vehicles.find((x) => x.id === form.vehicle.value);
+        const description = form.description.value.trim();
+        if (!v) return fail('Alege vehiculul.');
+        if (description.length < 5) return fail('Descrie pe scurt problema (minimum 5 caractere).');
+
+        const btn = form.querySelector('[type="submit"]');
+        const reset = () => { btn.disabled = false; btn.textContent = 'Trimite raportul'; };
+        btn.disabled = true; btn.textContent = 'Se trimite…';
+
+        let path = null;
+        const file = form.photo.files[0];
+        if (file) {
+          const blob = await compress(file);
+          const ext = blob.type === 'image/jpeg' ? 'jpg' : ((file.name.split('.').pop() || 'bin').toLowerCase());
+          path = `${profile.id}/${Date.now()}.${ext}`;
+          const { error: upErr } = await sb.storage.from('defect-photos').upload(path, blob, { contentType: blob.type || 'image/jpeg' });
+          if (upErr) { reset(); return fail('Poza nu s-a încărcat: ' + upErr.message); }
+        }
+
+        const { error } = await sb.from('defects').insert({
+          vehicle_id: v.id, category: form.category.value, description, photo_url: path
+        });
+        if (error) { reset(); return fail('Nu am putut trimite raportul: ' + error.message); }
+
+        lastVehicle = v.id;
+        notice = 'Defecțiunea a fost raportată. Mulțumim!';
         await load(false);
       });
     }
