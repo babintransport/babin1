@@ -24,9 +24,9 @@
   }
 
   function mount({ sb, profile, root, onLogout }) {
-    let view = 'tasks';
+    let view = 'home';
     let chatCleanup = null;
-    let tasks = [], vehicles = [], logs = [], defects = [];
+    let tasks = [], vehicles = [], logs = [], defects = [], trips = [], myOpen = null, tripsError = '';
     let loading = true, loadError = '', notice = '', lastVehicle = '';
 
     root.innerHTML = `
@@ -40,12 +40,14 @@
           <button data-logout class="text-sm bg-white/10 rounded-lg px-3 py-1.5 shrink-0">Deconectare</button>
         </header>
         <main id="empView" class="p-4 pb-24 max-w-xl mx-auto"></main>
-        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 grid grid-cols-4"
+        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex overflow-x-auto"
              style="padding-bottom:env(safe-area-inset-bottom,0px)">
-          <button data-nav="tasks" class="tab-btn py-3 text-sm text-slate-500">Task-uri</button>
-          <button data-nav="fuel" class="tab-btn py-3 text-sm text-slate-500">Alimentări</button>
-          <button data-nav="defects" class="tab-btn py-3 text-sm text-slate-500">Defecțiuni</button>
-          <button data-nav="chat" class="tab-btn py-3 text-sm text-slate-500">Chat</button>
+          <button data-nav="home" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Acasă</button>
+          <button data-nav="trips" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Curse</button>
+          <button data-nav="tasks" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Task-uri</button>
+          <button data-nav="fuel" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Alimentări</button>
+          <button data-nav="defects" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Defecțiuni</button>
+          <button data-nav="chat" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Chat</button>
         </nav>
       </div>`;
 
@@ -64,16 +66,21 @@
 
     async function load(spinner = true) {
       if (spinner) { loading = true; paint(); }
-      const [t, v, l, d] = await Promise.all([
+      const [t, v, l, d, tr, oh] = await Promise.all([
         sb.from('tasks').select('*').eq('assigned_to', profile.id).order('created_at', { ascending: false }),
         sb.from('vehicles').select('id, plate_number, model, current_km').order('plate_number'),
         sb.from('fuel_logs').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(20),
-        sb.from('defects').select('*').eq('reported_by', profile.id).order('created_at', { ascending: false }).limit(20)
+        sb.from('defects').select('*').eq('reported_by', profile.id).order('created_at', { ascending: false }).limit(20),
+        sb.from('trips').select('*').eq('driver_id', profile.id).order('scheduled_at', { ascending: true }),
+        sb.from('driver_history').select('*').eq('user_id', profile.id).is('end_time', null).order('start_time', { ascending: false }).limit(1)
       ]);
       loading = false;
       const err = t.error || v.error || l.error || d.error;
       loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
       tasks = t.data || []; vehicles = v.data || []; logs = l.data || []; defects = d.data || [];
+      tripsError = tr.error ? tr.error.message : '';
+      trips = tr.error ? [] : (tr.data || []);
+      myOpen = oh.error || !oh.data ? null : (oh.data[0] || null);
       paint();
     }
 
@@ -83,7 +90,9 @@
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
-      if (view === 'tasks') paintTasks();
+      if (view === 'home') paintHome();
+      else if (view === 'trips') paintTrips();
+      else if (view === 'tasks') paintTasks();
       else if (view === 'fuel') paintFuel();
       else if (view === 'defects') paintDefects();
       else chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: false });
@@ -232,6 +241,131 @@
         lastVehicle = v.id;
         notice = 'Alimentarea a fost salvată.';
         await load(false);
+      });
+    }
+
+    // ---------- Curse ----------
+    const TRIP_STATUS = { planned: 'Planificată', accepted: 'Acceptată', in_progress: 'În desfășurare', done: 'Finalizată', cancelled: 'Anulată' };
+    const TRIP_DOT = { planned: 'bg-slate-400', accepted: 'bg-navy-700', in_progress: 'bg-signal-green', done: 'bg-slate-300', cancelled: 'bg-signal-red' };
+    const TRIP_NEXT = {
+      planned: [['accepted', 'Acceptă'], ['in_progress', 'Începe cursa']],
+      accepted: [['in_progress', 'Începe cursa']],
+      in_progress: [['done', 'Finalizează']]
+    };
+    const fmtDT = (d) => new Date(d).toLocaleString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const plateOf = (id) => (vehicles.find((v) => v.id === id) || {}).plate_number || '–';
+
+    const tripCard = (t) => `
+      <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+        <div class="flex items-start gap-3">
+          <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${TRIP_DOT[t.status]}"></span>
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold text-navy-900 break-words">${esc(t.title)}</p>
+            <p class="text-sm text-muted">${TRIP_STATUS[t.status]} · ${fmtDT(t.scheduled_at)}</p>
+            ${t.origin || t.destination ? `<p class="mt-1 text-sm text-ink">${esc(t.origin || '?')} → ${esc(t.destination || '?')}</p>` : ''}
+            ${t.vehicle_id ? `<p class="text-sm text-muted">Vehicul: ${esc(plateOf(t.vehicle_id))}</p>` : ''}
+            ${t.instructions ? `<p class="mt-1 text-sm text-slate-700 break-words">${esc(t.instructions)}</p>` : ''}
+          </div>
+        </div>
+        ${(TRIP_NEXT[t.status] || []).length ? `<div class="mt-3 flex gap-2">${TRIP_NEXT[t.status].map(([st, label]) =>
+          `<button data-trip="${t.id}|${st}" class="flex-1 text-sm py-2 rounded-lg ${st === 'accepted' ? 'border border-slate-300 hover:bg-slate-50' : 'bg-navy-900 text-white hover:bg-navy-800'}">${label}</button>`).join('')}</div>` : ''}
+      </article>`;
+
+    async function setTrip(id, status) {
+      const patch = { status };
+      if (status === 'in_progress') patch.started_at = new Date().toISOString();
+      if (status === 'done') patch.finished_at = new Date().toISOString();
+      const { error } = await sb.from('trips').update(patch).eq('id', id);
+      if (error) alert('Nu am putut actualiza cursa: ' + error.message);
+      await load(false);
+    }
+
+    function bindTrips() {
+      $view.querySelectorAll('[data-trip]').forEach((b) => b.addEventListener('click', () => {
+        const [id, status] = b.dataset.trip.split('|');
+        b.disabled = true;
+        setTrip(id, status);
+      }));
+    }
+
+    function paintTrips() {
+      if (tripsError) {
+        $view.innerHTML = '<h1 class="text-2xl font-semibold text-navy-900">Cursele mele</h1><p class="mt-4 rounded-lg bg-amber-50 text-slate-700 px-4 py-3 text-sm">Modulul de curse nu este activat încă. Spune administratorului să ruleze scriptul 003_trips.sql.</p>';
+        return;
+      }
+      const active = trips.filter((t) => ['planned', 'accepted', 'in_progress'].includes(t.status));
+      const past = trips.filter((t) => t.status === 'done' || t.status === 'cancelled').reverse().slice(0, 20);
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Cursele mele</h1>
+        <div class="mt-4 space-y-3">
+          ${active.length ? active.map(tripCard).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-6 text-center text-slate-500">Nu ai curse active sau viitoare.</p>'}
+        </div>
+        ${past.length ? `<h2 class="mt-8 mb-3 font-semibold text-slate-600">Istoric</h2><div class="space-y-3">${past.map(tripCard).join('')}</div>` : ''}`;
+      bindTrips();
+    }
+
+    // ---------- Acasă ----------
+    function paintHome() {
+      const current = trips.find((t) => t.status === 'in_progress');
+      const next = current || trips.find((t) => t.status === 'planned' || t.status === 'accepted');
+      const task = tasks.find((t) => t.status !== 'done');
+      const veh = myOpen ? vehicles.find((v) => v.id === myOpen.vehicle_id) : null;
+      const box = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-4';
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Bună ziua!</h1>
+        <p class="text-muted break-all">${esc(profile.email)}</p>
+
+        <section class="mt-5 ${box}">
+          <h2 class="text-sm font-medium text-muted">Vehiculul tău acum</h2>
+          ${veh
+            ? `<p class="mt-1 text-xl font-semibold text-navy-900">${esc(veh.plate_number)}</p><p class="text-sm text-muted">${esc(veh.model || '')}${veh.current_km != null ? ' · ' + nf(veh.current_km) + ' km' : ''}</p>`
+            : '<p class="mt-1 text-slate-500">Niciun vehicul preluat. Apare aici când începi o cursă sau când ți-l repartizează administratorul.</p>'}
+        </section>
+
+        ${tripsError ? '' : `
+        <div class="mt-5 flex items-center justify-between">
+          <h2 class="text-sm font-medium text-muted">${current ? 'Cursa curentă' : 'Următoarea cursă'}</h2>
+          <button data-go="trips" class="text-sm text-signal-green font-medium">Toate cursele →</button>
+        </div>
+        <div class="mt-2">${next ? tripCard(next) : `<p class="${box} text-slate-500">Nicio cursă planificată.</p>`}</div>`}
+
+        <section class="mt-5 ${box}">
+          <div class="flex items-center justify-between"><h2 class="text-sm font-medium text-muted">Următorul task</h2><button data-go="tasks" class="text-sm text-signal-green font-medium">Toate →</button></div>
+          <p class="mt-1 ${task ? 'text-ink font-medium' : 'text-slate-500'} break-words">${task ? esc(task.title) : 'Nu ai task-uri active.'}</p>
+        </section>
+
+        <div class="mt-5 grid grid-cols-2 gap-3">
+          <button data-go="fuel" class="${box} text-left font-medium text-navy-900">Adaugă alimentare</button>
+          <button data-go="defects" class="${box} text-left font-medium text-navy-900">Raportează defecțiune</button>
+        </div>
+
+        <section class="mt-5 ${box}">
+          <h2 class="text-sm font-medium text-muted">Contul meu</h2>
+          <form id="pwForm" class="mt-2 space-y-2" novalidate>
+            <input name="pw" type="password" autocomplete="new-password" minlength="8" placeholder="Parolă nouă (minimum 8 caractere)"
+                   class="field w-full rounded-lg border border-slate-300 px-3 py-2.5">
+            <p id="pwMsg" class="hidden text-sm"></p>
+            <button type="submit" class="w-full rounded-lg border border-slate-300 hover:bg-slate-50 py-2.5 font-medium disabled:opacity-60">Schimbă parola</button>
+          </form>
+        </section>`;
+
+      bindTrips();
+      $view.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { view = b.dataset.go; notice = ''; paint(); window.scrollTo(0, 0); }));
+
+      const form = $view.querySelector('#pwForm');
+      const msg = $view.querySelector('#pwMsg');
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const show = (text, ok) => { msg.textContent = text; msg.className = 'text-sm ' + (ok ? 'text-signal-green' : 'text-signal-red'); };
+        if (form.pw.value.length < 8) return show('Parola trebuie să aibă minimum 8 caractere.', false);
+        const btn = form.querySelector('button');
+        btn.disabled = true;
+        const { error } = await sb.auth.updateUser({ password: form.pw.value });
+        btn.disabled = false;
+        if (error) return show('Nu am putut schimba parola: ' + error.message, false);
+        form.pw.value = '';
+        show('Parola a fost schimbată.', true);
       });
     }
 

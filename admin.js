@@ -90,6 +90,7 @@
     chat: '<path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-5.4A8 8 0 1121 12z"/>',
     map: '<path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     euro: '<path d="M18 6a7 7 0 100 12M4 10h9M4 14h9"/>',
+    trips: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h5a4 4 0 000-8h-2a4 4 0 010-8h5"/>',
     documents: '<path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>'
   };
   const svgIcon = (id, cls = 'w-5 h-5') =>
@@ -98,6 +99,7 @@
   const NAV = [
     ['dashboard', 'Prezentare generală', 'Start'],
     ['vehicles', 'Flotă', 'Flotă'],
+    ['trips', 'Curse', 'Curse'],
     ['documents', 'Documente', 'Documente'],
     ['alerts', 'Centru de alerte', 'Alerte'],
     ['tasks', 'Task-uri', 'Task-uri'],
@@ -160,12 +162,12 @@
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
-    let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [], docs = [];
+    let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [], docs = [], trips = [];
     let view = 'dashboard';
     let fuelRange = 'all';
     let chatCleanup = null;
     let histVehicle = '', histDriver = '', lookup = { vid: '', t: '' };
-    let docVehicle = '', docsError = '';
+    let docVehicle = '', docsError = '', tripsError = '', tripFilter = '';
     let loading = true;
     let loadError = '';
 
@@ -192,14 +194,15 @@
 
     async function reload() {
       loading = true; paint();
-      const [v, t, u, d, f, h, dc] = await Promise.all([
+      const [v, t, u, d, f, h, dc, tp] = await Promise.all([
         sb.from('vehicles').select('*').order('plate_number'),
         sb.from('tasks').select('*').order('created_at', { ascending: false }),
         sb.from('users').select('id, email, role').order('email'),
         sb.from('defects').select('*').order('created_at', { ascending: false }),
         sb.from('fuel_logs').select('*').order('created_at', { ascending: false }).limit(2000),
         sb.from('driver_history').select('*').order('start_time', { ascending: false }).limit(2000),
-        sb.from('vehicle_documents').select('*').order('expiry_date', { ascending: true })
+        sb.from('vehicle_documents').select('*').order('expiry_date', { ascending: true }),
+        sb.from('trips').select('*').order('scheduled_at', { ascending: false }).limit(1000)
       ]);
       loading = false;
       const err = v.error || t.error || u.error || d.error || f.error || h.error;
@@ -207,6 +210,8 @@
       vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || []; fuel = f.data || []; drives = h.data || [];
       docsError = dc.error ? dc.error.message : '';
       docs = dc.error ? [] : (dc.data || []);
+      tripsError = tp.error ? tp.error.message : '';
+      trips = tp.error ? [] : (tp.data || []);
       vehicles.forEach((x) => { x.docs = docs.filter((y) => y.vehicle_id === x.id); });
       updateBell();
       paint();
@@ -227,6 +232,7 @@
       else if (view === 'chat') chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: true });
       else if (view === 'drivers') paintHistory();
       else if (view === 'documents') paintDocs();
+      else if (view === 'trips') paintTrips();
       else chatCleanup = paintMap();
     }
 
@@ -294,6 +300,7 @@
       fuel.slice(0, 10).forEach((l) => ev.push({ t: l.created_at, text: `Alimentare ${plateOf(l.vehicle_id)}: ${n1(l.liters, 0)} L, ${eur(l.total_price)}` }));
       defects.slice(0, 10).forEach((d) => ev.push({ t: d.created_at, text: `Defecțiune raportată: ${plateOf(d.vehicle_id)}${d.category ? ' (' + d.category + ')' : ''}` }));
       tasks.slice(0, 10).forEach((t) => ev.push({ t: t.created_at, text: `Task nou: ${t.title}` }));
+      trips.slice(0, 10).forEach((x) => ev.push({ t: x.created_at, text: `Cursă nouă: ${x.title}` }));
       drives.slice(0, 10).forEach((h) => ev.push({ t: h.start_time, text: `${emailOf(h.user_id)} a preluat ${plateOf(h.vehicle_id)}` }));
       ev.sort((x, y) => new Date(y.t) - new Date(x.t));
       const when = (d) => {
@@ -347,13 +354,15 @@
           </div>
         </div>
 
-        <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
           ${kpi('vehicles', 'bg-blue-50 text-navy-800', rows.length, 'Vehicule în flotă', `<span class="text-muted">${fine} fără probleme</span>`)}
           ${kpi('alerts', 'bg-red-50 text-signal-red', urgent, 'Alerte urgente', `<span class="text-muted">${attention} de urmărit</span>`)}
           ${kpi('tasks', 'bg-green-50 text-signal-green', openTasks, 'Task-uri deschise', '')}
           ${kpi('defects', 'bg-amber-50 text-signal-yellow', openDefects, 'Defecțiuni nerezolvate', '')}
           ${kpi('fuel', 'bg-blue-50 text-navy-800', n1(cur.liters, 0) + ' L', 'Combustibil luna aceasta', trend(cur.liters, prev.liters))}
           ${kpi('euro', 'bg-green-50 text-signal-green', eur(cur.cost), 'Cost combustibil luna aceasta', trend(cur.cost, prev.cost))}
+          ${kpi('trips', 'bg-green-50 text-signal-green', trips.filter((x) => x.status === 'in_progress').length, 'Curse în desfășurare', '')}
+          ${kpi('trips', 'bg-blue-50 text-navy-800', trips.filter((x) => x.status === 'planned' || x.status === 'accepted').length, 'Curse planificate', '')}
         </div>
 
         <div class="mt-6 grid gap-4 lg:grid-cols-2">
@@ -1080,6 +1089,150 @@
         const { error } = h
           ? await sb.from('driver_history').update(payload).eq('id', h.id)
           : await sb.from('driver_history').insert(payload);
+        btn.disabled = false;
+        if (error) return fail('Nu am putut salva: ' + error.message);
+        close();
+        reload();
+      });
+    }
+
+    // ----- Curse -----
+    const TRIP_STATUS = { planned: 'Planificată', accepted: 'Acceptată', in_progress: 'În desfășurare', done: 'Finalizată', cancelled: 'Anulată' };
+    const TRIP_DOT = { planned: 'bg-slate-400', accepted: 'bg-navy-700', in_progress: 'bg-signal-green', done: 'bg-slate-300', cancelled: 'bg-signal-red' };
+
+    function paintTrips() {
+      if (tripsError) {
+        $view.innerHTML = `
+          <h1 class="text-2xl font-semibold text-navy-900">Curse</h1>
+          <p class="mt-4 rounded-lg bg-amber-50 text-slate-700 px-4 py-3 text-sm">Modulul de curse nu este activat încă. Rulează în Supabase (SQL Editor) scriptul <strong>003_trips.sql</strong>, apoi reîncarcă pagina.<br><span class="text-muted">${esc(tripsError)}</span></p>`;
+        return;
+      }
+      const match = (x) => !tripFilter || (tripFilter === 'planned' ? (x.status === 'planned' || x.status === 'accepted') : x.status === tripFilter);
+      const list = trips.filter(match);
+      const chips = [['', 'Toate'], ['planned', 'Planificate'], ['in_progress', 'În desfășurare'], ['done', 'Finalizate']];
+
+      $view.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold text-navy-900">Curse</h1>
+            <p class="text-muted">Repartizează șofer și vehicul, urmărește confirmarea și finalizarea.</p>
+          </div>
+          <button data-tadd2 class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2 shrink-0">Cursă nouă</button>
+        </div>
+        <div class="mt-5 flex flex-wrap gap-2 text-sm">
+          ${chips.map(([k, l]) => `<button data-tf="${k}" class="px-3 py-1.5 rounded-full ${tripFilter === k ? 'bg-navy-900 text-white' : 'bg-white border border-slate-200 text-muted hover:bg-slate-50'}">${l}</button>`).join('')}
+        </div>
+        <div class="mt-4 space-y-3">
+          ${list.length ? list.map((x) => `
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+              <div class="flex items-start gap-3">
+                <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${TRIP_DOT[x.status]}"></span>
+                <div class="min-w-0 flex-1">
+                  <h2 class="font-semibold text-navy-900 break-words">${esc(x.title)}</h2>
+                  <p class="text-sm text-muted">${TRIP_STATUS[x.status]} · ${fmtDT(x.scheduled_at)}</p>
+                  ${x.origin || x.destination ? `<p class="mt-1 text-sm text-ink">${esc(x.origin || '?')} → ${esc(x.destination || '?')}</p>` : ''}
+                  <p class="text-sm text-muted">Șofer: ${x.driver_id ? esc(emailOf(x.driver_id)) : 'nerepartizat'} · Vehicul: ${x.vehicle_id ? esc(plateOf(x.vehicle_id)) : '–'}</p>
+                  ${x.instructions ? `<p class="mt-1 text-sm text-slate-700 break-words">${esc(x.instructions)}</p>` : ''}
+                  ${x.started_at ? `<p class="text-xs text-muted mt-1">Început: ${fmtDT(x.started_at)}${x.finished_at ? ' · Finalizat: ' + fmtDT(x.finished_at) : ''}</p>` : ''}
+                </div>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button data-tedit2="${x.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Editează</button>
+                ${x.status === 'done' || x.status === 'cancelled' ? '' : `<button data-tcancel="${x.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Anulează</button>`}
+                <button data-tdel2="${x.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+              </div>
+            </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nicio cursă. Creează prima cursă.</p>'}
+        </div>`;
+
+      $view.querySelector('[data-tadd2]').addEventListener('click', () => openTripForm(null));
+      $view.querySelectorAll('[data-tf]').forEach((b) => b.addEventListener('click', () => { tripFilter = b.dataset.tf; paint(); }));
+      $view.querySelectorAll('[data-tedit2]').forEach((b) =>
+        b.addEventListener('click', () => openTripForm(trips.find((x) => x.id === b.dataset.tedit2))));
+      $view.querySelectorAll('[data-tcancel]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Anulezi această cursă?')) return;
+        const { error } = await sb.from('trips').update({ status: 'cancelled' }).eq('id', b.dataset.tcancel);
+        if (error) return alert('Nu am putut anula: ' + error.message);
+        reload();
+      }));
+      $view.querySelectorAll('[data-tdel2]').forEach((b) => b.addEventListener('click', async () => {
+        if (!confirm('Ștergi această cursă? Acțiunea nu poate fi anulată.')) return;
+        const { error } = await sb.from('trips').delete().eq('id', b.dataset.tdel2);
+        if (error) return alert('Nu am putut șterge: ' + error.message);
+        reload();
+      }));
+    }
+
+    function openTripForm(x) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 z-50 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6';
+      const inp = (name, label, val, type = 'text') => `<label class="block"><span class="block text-sm font-medium mb-1">${label}</span><input name="${name}" type="${type}" value="${esc(val || '')}" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></label>`;
+      modal.innerHTML = `
+        <form class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 md:p-6 max-h-[92vh] overflow-y-auto" novalidate>
+          <h2 class="text-xl font-semibold text-navy-900">${x ? 'Editează cursa' : 'Cursă nouă'}</h2>
+          <div class="mt-4 space-y-4">
+            ${inp('title', 'Titlu (ex. Berlin → Hamburg)', x && x.title)}
+            <div class="grid gap-4 sm:grid-cols-2">
+              <label class="block"><span class="block text-sm font-medium mb-1">Șofer</span>
+                <select name="driver" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+                  <option value="">Alege șoferul</option>
+                  ${people.map((p) => `<option value="${p.id}" ${x && x.driver_id === p.id ? 'selected' : ''}>${esc(p.email)}</option>`).join('')}
+                </select></label>
+              <label class="block"><span class="block text-sm font-medium mb-1">Vehicul</span>
+                <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${vehicleOptions(x ? x.vehicle_id : '', false)}</select></label>
+            </div>
+            <div class="grid gap-4 sm:grid-cols-2">
+              ${inp('origin', 'Adresă de plecare', x && x.origin)}
+              ${inp('destination', 'Destinație', x && x.destination)}
+            </div>
+            ${inp('when', 'Data și ora', toLocalInput(x ? x.scheduled_at : new Date().toISOString()), 'datetime-local')}
+            <label class="block"><span class="block text-sm font-medium mb-1">Instrucțiuni</span>
+              <textarea name="instructions" rows="3" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5">${x ? esc(x.instructions || '') : ''}</textarea></label>
+            ${x ? `<label class="block"><span class="block text-sm font-medium mb-1">Stare</span>
+              <select name="status" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+                ${Object.entries(TRIP_STATUS).map(([k, l]) => `<option value="${k}" ${x.status === k ? 'selected' : ''}>${l}</option>`).join('')}
+              </select></label>` : ''}
+          </div>
+          <p class="err hidden mt-4 text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" data-cancel class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Anulează</button>
+            <button type="submit" class="px-4 py-2 rounded-lg bg-navy-900 hover:bg-navy-800 text-white disabled:opacity-60">Salvează</button>
+          </div>
+        </form>`;
+      root.appendChild(modal);
+
+      const form = modal.querySelector('form');
+      const err = modal.querySelector('.err');
+      const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', onKey);
+      modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+      modal.querySelector('[data-cancel]').addEventListener('click', close);
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.classList.add('hidden');
+        const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+        const title = form.title.value.trim();
+        if (!title) return fail('Completează titlul cursei.');
+        if (!form.driver.value) return fail('Alege șoferul.');
+        if (!form.when.value) return fail('Completează data și ora.');
+
+        const payload = {
+          title,
+          driver_id: form.driver.value,
+          vehicle_id: form.vehicle.value || null,
+          origin: form.origin.value.trim() || null,
+          destination: form.destination.value.trim() || null,
+          scheduled_at: new Date(form.when.value).toISOString(),
+          instructions: form.instructions.value.trim() || null
+        };
+        if (x) payload.status = form.status.value;
+
+        const btn = form.querySelector('[type="submit"]');
+        btn.disabled = true;
+        const { error } = x
+          ? await sb.from('trips').update(payload).eq('id', x.id)
+          : await sb.from('trips').insert(payload);
         btn.disabled = false;
         if (error) return fail('Nu am putut salva: ' + error.message);
         close();
