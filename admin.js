@@ -66,10 +66,20 @@
     return { level: w.level, text };
   }
 
+  function svcStatus(v) {
+    const list = (v.jobs || []).filter((j) => j.status === 'planned' && j.scheduled_date);
+    if (!list.length) return { level: 'none', text: 'Nicio lucrare programată' };
+    const j = list.slice().sort((x, y) => (x.scheduled_date < y.scheduled_date ? -1 : 1))[0];
+    const days = daysUntil(j.scheduled_date);
+    const level = days < 0 ? 'red' : days <= 14 ? 'yellow' : 'green';
+    const text = days < 0 ? `${j.kind}: întârziat cu ${-days} zile` : `${j.kind}: în ${days} zile (${fmtDate(j.scheduled_date)})`;
+    return { level, text };
+  }
+
   function statusOf(v) {
-    const tuv = tuvStatus(v), oil = oilStatus(v), tire = tireStatus(v), doc = docStatus(v);
-    const worst = [tuv, oil, tire, doc].map((s) => s.level).sort((a, b) => LEVEL[a] - LEVEL[b])[0];
-    return { tuv, oil, tire, doc, worst };
+    const tuv = tuvStatus(v), oil = oilStatus(v), tire = tireStatus(v), doc = docStatus(v), svc = svcStatus(v);
+    const worst = [tuv, oil, tire, doc, svc].map((s) => s.level).sort((x, y) => LEVEL[x] - LEVEL[y])[0];
+    return { tuv, oil, tire, doc, svc, worst };
   }
 
   const statusItem = (label, s) => `
@@ -90,6 +100,8 @@
     chat: '<path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-5.4A8 8 0 1121 12z"/>',
     map: '<path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     euro: '<path d="M18 6a7 7 0 100 12M4 10h9M4 14h9"/>',
+    finance: '<path d="M18 6a7 7 0 100 12M4 10h9M4 14h9"/>',
+    service: '<path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.3-.7-.7-2.3z"/>',
     trips: '<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h5a4 4 0 000-8h-2a4 4 0 010-8h5"/>',
     documents: '<path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/>'
   };
@@ -101,6 +113,8 @@
     ['vehicles', 'Flotă', 'Flotă'],
     ['trips', 'Curse', 'Curse'],
     ['documents', 'Documente', 'Documente'],
+    ['service', 'Service', 'Service'],
+    ['finance', 'Finanțe', 'Finanțe'],
     ['alerts', 'Centru de alerte', 'Alerte'],
     ['tasks', 'Task-uri', 'Task-uri'],
     ['defects', 'Defecțiuni', 'Defecțiuni'],
@@ -120,6 +134,7 @@
       .nav-btn[aria-current="page"] { background: #16834A; color: #fff; font-weight: 600; }
       .tab-btn[aria-current="page"] { color: #16834A; font-weight: 600; box-shadow: inset 0 2px 0 #16834A; }
       .bar { transition: opacity .15s; } .bar:hover { opacity: .75; }
+      @media print { aside, header, nav, button, select, .no-print { display: none !important; } main { padding: 0 !important; max-width: none !important; } }
     </style>
     <div class="min-h-full md:flex bg-surface">
       <aside class="hidden md:flex md:flex-col md:w-64 md:sticky md:top-0 md:h-screen bg-navy-900 text-white p-4 gap-5">
@@ -162,12 +177,13 @@
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
-    let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [], docs = [], trips = [];
+    let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [], docs = [], trips = [], expenses = [], jobs = [];
     let view = 'dashboard';
     let fuelRange = 'all';
     let chatCleanup = null;
     let histVehicle = '', histDriver = '', lookup = { vid: '', t: '' };
     let docVehicle = '', docsError = '', tripsError = '', tripFilter = '';
+    let finRange = 'month', finVehicle = '', finError = '', svcFilter = 'planned';
     let loading = true;
     let loadError = '';
 
@@ -194,7 +210,7 @@
 
     async function reload() {
       loading = true; paint();
-      const [v, t, u, d, f, h, dc, tp] = await Promise.all([
+      const [v, t, u, d, f, h, dc, tp, ex, sj] = await Promise.all([
         sb.from('vehicles').select('*').order('plate_number'),
         sb.from('tasks').select('*').order('created_at', { ascending: false }),
         sb.from('users').select('id, email, role').order('email'),
@@ -202,7 +218,9 @@
         sb.from('fuel_logs').select('*').order('created_at', { ascending: false }).limit(2000),
         sb.from('driver_history').select('*').order('start_time', { ascending: false }).limit(2000),
         sb.from('vehicle_documents').select('*').order('expiry_date', { ascending: true }),
-        sb.from('trips').select('*').order('scheduled_at', { ascending: false }).limit(1000)
+        sb.from('trips').select('*').order('scheduled_at', { ascending: false }).limit(1000),
+        sb.from('expenses').select('*').order('expense_date', { ascending: false }).limit(2000),
+        sb.from('service_jobs').select('*').order('scheduled_date', { ascending: true }).limit(2000)
       ]);
       loading = false;
       const err = v.error || t.error || u.error || d.error || f.error || h.error;
@@ -212,7 +230,10 @@
       docs = dc.error ? [] : (dc.data || []);
       tripsError = tp.error ? tp.error.message : '';
       trips = tp.error ? [] : (tp.data || []);
-      vehicles.forEach((x) => { x.docs = docs.filter((y) => y.vehicle_id === x.id); });
+      finError = ex.error ? ex.error.message : (sj.error ? sj.error.message : '');
+      expenses = ex.error ? [] : (ex.data || []);
+      jobs = sj.error ? [] : (sj.data || []);
+      vehicles.forEach((x) => { x.docs = docs.filter((y) => y.vehicle_id === x.id); x.jobs = jobs.filter((y) => y.vehicle_id === x.id); });
       updateBell();
       paint();
     }
@@ -233,6 +254,8 @@
       else if (view === 'drivers') paintHistory();
       else if (view === 'documents') paintDocs();
       else if (view === 'trips') paintTrips();
+      else if (view === 'finance') paintFinance();
+      else if (view === 'service') paintService();
       else chatCleanup = paintMap();
     }
 
@@ -260,6 +283,11 @@
         const o = agg[k] || (agg[k] = { liters: 0, cost: 0 });
         o.liters += Number(l.liters); o.cost += Number(l.total_price);
       });
+      const aggAll = {};
+      const addAll = (key, cost, liters) => { const o = aggAll[key] || (aggAll[key] = { liters: 0, cost: 0 }); o.cost += cost; o.liters += liters; };
+      fuel.forEach((l) => addAll(mKey(l.created_at), Number(l.total_price), Number(l.liters)));
+      expenses.forEach((x) => addAll(mKey(x.expense_date + 'T00:00:00'), Number(x.amount), 0));
+      jobs.filter((j) => j.status === 'done' && j.cost != null).forEach((j) => addAll(mKey((j.done_date || j.scheduled_date) + 'T00:00:00'), Number(j.cost), 0));
       const now = new Date();
       const cur = agg[mKey(now)] || { liters: 0, cost: 0 };
       const prev = agg[mKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))] || { liters: 0, cost: 0 };
@@ -281,14 +309,14 @@
 
       // vehicule după gravitatea alertei
       const worstText = (st) => {
-        const hit = [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire], ['Documente', st.doc]].find(([, x]) => x.level === st.worst);
+        const hit = [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire], ['Documente', st.doc], ['Service', st.svc]].find(([, x]) => x.level === st.worst);
         return hit ? `${hit[0]}: ${hit[1].text}` : 'Fără date pentru alerte';
       };
       const fleetRows = [...rows].sort((a, b) => LEVEL[a.st.worst] - LEVEL[b.st.worst]).slice(0, 6);
 
       // avertizări
       const alerts = [];
-      rows.forEach(({ v, st }) => [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire], ['Documente', st.doc]].forEach(([label, s]) => {
+      rows.forEach(({ v, st }) => [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire], ['Documente', st.doc], ['Service', st.svc]].forEach(([label, s]) => {
         if (s.level === 'red' || s.level === 'yellow') alerts.push({ level: s.level, title: `${label} · ${v.plate_number}`, text: s.text });
       }));
       defects.filter((d) => d.status === 'new').forEach((d) =>
@@ -314,7 +342,7 @@
       const months = [];
       for (let i = dashMonths - 1; i >= 0; i--) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-        const o = agg[mKey(d)] || { liters: 0, cost: 0 };
+        const o = aggAll[mKey(d)] || { liters: 0, cost: 0 };
         months.push({ label: d.toLocaleDateString('ro-RO', { month: 'short' }).replace('.', ''), cost: o.cost, liters: o.liters });
       }
       const chart = () => {
@@ -334,10 +362,10 @@
         const bars = months.map((m, i) => {
           const x = L + iw * i + (iw - bw) / 2;
           return `<g><rect class="bar" x="${x}" y="${y(m.cost)}" width="${bw}" height="${(H - T - B) * (m.cost / top)}" rx="4" fill="#16834A">` +
-                 `<title>${esc(m.label)}: ${eur(m.cost)} · ${n1(m.liters, 0)} L</title></rect>` +
+                 `<title>${esc(m.label)}: ${eur(m.cost)} · ${n1(m.liters, 0)} L combustibil</title></rect>` +
                  `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#718096">${esc(m.label)}</text></g>`;
         }).join('');
-        return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="Cheltuieli cu combustibilul pe luni">${grid}${bars}</svg>`;
+        return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="Cheltuieli pe luni">${grid}${bars}</svg>`;
       };
 
       const card = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-5';
@@ -396,13 +424,13 @@
 
           <section class="${card}">
             <div class="flex items-center justify-between mb-3">
-              <h2 class="font-semibold text-navy-900">Cheltuieli cu combustibilul</h2>
+              <h2 class="font-semibold text-navy-900">Cheltuieli lunare</h2>
               <div class="flex gap-1 text-sm">
                 ${[6, 12].map((n) => `<button data-months="${n}" class="px-3 py-1 rounded-full ${dashMonths === n ? 'bg-navy-900 text-white' : 'text-muted hover:bg-slate-100'}">${n} luni</button>`).join('')}
               </div>
             </div>
             ${chart()}
-            <p class="mt-2 text-xs text-muted">Calculat din alimentările înregistrate de șoferi. Alte cheltuieli (service, asigurări) vor apărea după modulul Finanțe.</p>
+            <p class="mt-2 text-xs text-muted">Include combustibil, service efectuat și alte cheltuieli înregistrate. Detalii în pagina Finanțe.</p>
           </section>
 
           <section class="${card}">
@@ -446,7 +474,7 @@
                 <h2 class="font-semibold text-navy-900">${esc(v.plate_number)}</h2>
                 <span class="text-slate-500 truncate">${esc(v.model || '')}</span>
               </div>
-              <div class="mt-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">${statusItem('TÜV', st.tuv)}${statusItem('Ulei', st.oil)}${statusItem('Anvelope', st.tire)}${statusItem('Documente', st.doc)}</div>
+              <div class="mt-3 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">${statusItem('TÜV', st.tuv)}${statusItem('Ulei', st.oil)}${statusItem('Anvelope', st.tire)}${statusItem('Documente', st.doc)}${statusItem('Service', st.svc)}</div>
             </article>`).join('') : emptyState()}
         </div>`;
       bindAdd();
@@ -480,8 +508,8 @@
                 <dt>Anvelope</dt><dd>${esc(TIRE[v.tire_type] || '–')}</dd>
                 <dt>Dispozitiv PAJ</dt><dd class="truncate">${esc(v.paj_device_id || '–')}</dd>
               </dl>
-              <div class="mt-3 pt-3 border-t border-slate-100 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                ${statusItem('TÜV', st.tuv)}${statusItem('Ulei', st.oil)}${statusItem('Anvelope', st.tire)}${statusItem('Documente', st.doc)}
+              <div class="mt-3 pt-3 border-t border-slate-100 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                ${statusItem('TÜV', st.tuv)}${statusItem('Ulei', st.oil)}${statusItem('Anvelope', st.tire)}${statusItem('Documente', st.doc)}${statusItem('Service', st.svc)}
               </div>
             </article>`;
           }).join('') : emptyState()}
@@ -1093,6 +1121,369 @@
         if (error) return fail('Nu am putut salva: ' + error.message);
         close();
         reload();
+      });
+    }
+
+    // ----- Finanțe -----
+    const EXP_CAT = { asigurare: 'Asigurare', taxa: 'Taxe', anvelope: 'Anvelope', reparatie: 'Reparații', altele: 'Altele' };
+    const SVC_KINDS = ['Revizie', 'Schimb ulei', 'Filtre', 'Frâne', 'Anvelope', 'Reparație', 'Altele'];
+    const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const todayStr = () => ymd(new Date());
+
+    async function openFile(bucket, path) {
+      if (/\.(jpe?g|png|webp|gif)$/i.test(path || '')) return showPhoto(bucket, path);
+      const w = window.open('', '_blank');
+      const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 300);
+      if (error || !data) { if (w) w.close(); return alert('Nu am putut deschide fișierul.'); }
+      if (w) w.location = data.signedUrl; else window.location = data.signedUrl;
+    }
+
+    const finSince = () => {
+      const n = new Date();
+      if (finRange === 'month') return ymd(new Date(n.getFullYear(), n.getMonth(), 1));
+      if (finRange === '3m') return ymd(new Date(n.getFullYear(), n.getMonth() - 2, 1));
+      if (finRange === 'year') return n.getFullYear() + '-01-01';
+      return '0000-01-01';
+    };
+
+    function finRows() {
+      const since = finSince();
+      const rows = [];
+      fuel.forEach((l) => rows.push({ date: String(l.created_at).slice(0, 10), vehicle_id: l.vehicle_id, cat: 'Combustibil', amount: Number(l.total_price), desc: `${n1(l.liters, 2)} L`, km: l.kilometers, src: 'fuel' }));
+      expenses.forEach((x) => rows.push({ date: x.expense_date, vehicle_id: x.vehicle_id, cat: EXP_CAT[x.category] || x.category, amount: Number(x.amount), desc: [x.description, x.supplier].filter(Boolean).join(' · '), src: 'expense', id: x.id, file: x.file_path }));
+      jobs.filter((j) => j.status === 'done' && j.cost != null).forEach((j) => rows.push({ date: j.done_date || j.scheduled_date, vehicle_id: j.vehicle_id, cat: 'Service', amount: Number(j.cost), desc: `${j.kind}${j.workshop ? ' – ' + j.workshop : ''}`, src: 'job', file: j.file_path }));
+      return rows.filter((r) => r.date && r.date >= since && (!finVehicle || r.vehicle_id === finVehicle))
+        .sort((x, y) => (x.date < y.date ? 1 : -1));
+    }
+
+    function exportCsv() {
+      const rows = finRows();
+      const q = (s) => '"' + String(s == null ? '' : s).replace(/"/g, '""') + '"';
+      const lines = ['Data;Vehicul;Categorie;Descriere;Suma (EUR)'].concat(rows.map((r) =>
+        [q(fmtDate(r.date)), q(plateOf(r.vehicle_id)), q(r.cat), q(r.desc), r.amount.toFixed(2).replace('.', ',')].join(';')));
+      const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = `cheltuieli-${finRange}.csv`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1500);
+    }
+
+    const needMigration = (title, script, detail) => `
+      <h1 class="text-2xl font-semibold text-navy-900">${title}</h1>
+      <p class="mt-4 rounded-lg bg-amber-50 text-slate-700 px-4 py-3 text-sm">Modulul nu este activat încă. Rulează în Supabase (SQL Editor) scriptul <strong>${script}</strong>, apoi reîncarcă pagina.<br><span class="text-muted">${esc(detail)}</span></p>`;
+
+    function paintFinance() {
+      if (finError) { $view.innerHTML = needMigration('Finanțe', '004_finance_service.sql', finError); return; }
+      const rows = finRows();
+      const sum = (f) => rows.filter(f).reduce((s, r) => s + r.amount, 0);
+      const total = sum(() => true), fuelT = sum((r) => r.cat === 'Combustibil'), svcT = sum((r) => r.cat === 'Service'), otherT = total - fuelT - svcT;
+      const cats = {};
+      rows.forEach((r) => { cats[r.cat] = (cats[r.cat] || 0) + r.amount; });
+      const catList = Object.entries(cats).sort((x, y) => y[1] - x[1]);
+      const maxC = catList.length ? catList[0][1] : 1;
+
+      const pv = {};
+      rows.forEach((r) => {
+        const o = pv[r.vehicle_id] || (pv[r.vehicle_id] = { fuel: 0, svc: 0, other: 0, kmMin: Infinity, kmMax: -Infinity });
+        if (r.cat === 'Combustibil') { o.fuel += r.amount; if (r.km != null) { o.kmMin = Math.min(o.kmMin, r.km); o.kmMax = Math.max(o.kmMax, r.km); } }
+        else if (r.cat === 'Service') o.svc += r.amount;
+        else o.other += r.amount;
+      });
+      const pvRows = Object.entries(pv).map(([vid, o]) => {
+        const tot = o.fuel + o.svc + o.other, km = o.kmMax > o.kmMin ? o.kmMax - o.kmMin : 0;
+        return { vid, ...o, tot, km, perKm: km > 0 ? tot / km : null };
+      }).sort((x, y) => y.tot - x.tot);
+
+      const tile = (label, value) => `<div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4"><div class="text-xl font-semibold text-ink">${value}</div><div class="text-sm text-muted">${label}</div></div>`;
+      const card = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-5';
+
+      $view.innerHTML = `
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold text-navy-900">Finanțe</h1>
+            <p class="text-muted">Combustibil, service și alte cheltuieli, pe vehicul.</p>
+          </div>
+          <div class="flex flex-wrap gap-2 no-print">
+            <button data-fadd class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă cheltuială</button>
+            <button data-fcsv class="rounded-lg border border-slate-300 hover:bg-slate-50 px-4 py-2">Export Excel (CSV)</button>
+            <button data-fprint class="rounded-lg border border-slate-300 hover:bg-slate-50 px-4 py-2">Tipărește / PDF</button>
+          </div>
+        </div>
+
+        <div class="mt-5 flex flex-wrap gap-2 no-print">
+          <select id="finRange" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            ${[['month', 'Luna aceasta'], ['3m', 'Ultimele 3 luni'], ['year', 'Anul acesta'], ['all', 'Toată perioada']].map(([k, l]) => `<option value="${k}" ${finRange === k ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+          <select id="finVeh" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">${vehicleOptions(finVehicle, true)}</select>
+        </div>
+
+        <div class="mt-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+          ${tile('Total cheltuieli', eur(total))}${tile('Combustibil', eur(fuelT))}${tile('Service', eur(svcT))}${tile('Alte cheltuieli', eur(otherT))}
+        </div>
+
+        <div class="mt-4 grid gap-4 lg:grid-cols-2">
+          <section class="${card}">
+            <h2 class="font-semibold text-navy-900 mb-3">Pe categorii</h2>
+            ${catList.length ? catList.map(([c, v]) => `
+              <div class="mb-3">
+                <div class="flex justify-between text-sm"><span>${esc(c)}</span><span class="font-medium">${eur(v)}</span></div>
+                <div class="mt-1 h-2 rounded-full bg-slate-100"><div class="h-2 rounded-full bg-signal-green" style="width:${Math.max(3, (v / maxC) * 100)}%"></div></div>
+              </div>`).join('') : '<p class="text-sm text-muted py-4 text-center">Nicio cheltuială în perioada aleasă.</p>'}
+          </section>
+
+          <section class="${card}">
+            <h2 class="font-semibold text-navy-900 mb-3">Pe vehicul</h2>
+            ${pvRows.length ? pvRows.map((r) => `
+              <div class="py-2.5 border-t border-slate-100 first:border-0 text-sm">
+                <div class="flex justify-between"><span class="font-medium text-ink">${esc(plateOf(r.vid))}</span><span class="font-semibold">${eur(r.tot)}</span></div>
+                <div class="text-muted">Combustibil ${eur(r.fuel)} · Service ${eur(r.svc)} · Altele ${eur(r.other)}</div>
+                <div class="text-muted">${r.perKm != null ? `Cost pe km (estimat): ${n1(r.perKm, 2)} € · ${nf(r.km)} km` : 'Cost pe km: nu există suficiente alimentări'}</div>
+              </div>`).join('') : '<p class="text-sm text-muted py-4 text-center">Nicio cheltuială în perioada aleasă.</p>'}
+          </section>
+        </div>
+
+        <section class="mt-4 ${card}">
+          <h2 class="font-semibold text-navy-900 mb-3">Ultimele cheltuieli</h2>
+          ${rows.length ? rows.slice(0, 50).map((r) => `
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 border-t border-slate-100 first:border-0 text-sm">
+              <span class="text-muted w-20 shrink-0">${fmtDate(r.date)}</span>
+              <span class="font-medium text-ink">${esc(plateOf(r.vehicle_id))}</span>
+              <span class="text-muted">${esc(r.cat)}</span>
+              <span class="text-muted truncate min-w-0 flex-1">${esc(r.desc)}</span>
+              <span class="font-semibold">${eur(r.amount)}</span>
+              <span class="flex gap-2 no-print">
+                ${r.file ? `<button data-ffile="${esc(r.file)}" class="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50">Factură</button>` : ''}
+                ${r.src === 'expense' ? `<button data-fedit="${r.id}" class="px-2 py-1 rounded border border-slate-300 hover:bg-slate-50">Editează</button><button data-fdel3="${r.id}" class="px-2 py-1 rounded border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>` : `<span class="text-xs text-slate-400 self-center">${r.src === 'fuel' ? 'din Combustibil' : 'din Service'}</span>`}
+              </span>
+            </div>`).join('') : '<p class="text-sm text-muted py-4 text-center">Nicio cheltuială în perioada aleasă.</p>'}
+        </section>`;
+
+      $view.querySelector('[data-fadd]').addEventListener('click', () => openExpenseForm(null));
+      $view.querySelector('[data-fcsv]').addEventListener('click', exportCsv);
+      $view.querySelector('[data-fprint]').addEventListener('click', () => window.print());
+      $view.querySelector('#finRange').addEventListener('change', (e) => { finRange = e.target.value; paint(); });
+      $view.querySelector('#finVeh').addEventListener('change', (e) => { finVehicle = e.target.value; paint(); });
+      $view.querySelectorAll('[data-ffile]').forEach((b) => b.addEventListener('click', () => openFile('expense-docs', b.dataset.ffile)));
+      $view.querySelectorAll('[data-fedit]').forEach((b) =>
+        b.addEventListener('click', () => openExpenseForm(expenses.find((x) => x.id === b.dataset.fedit))));
+      $view.querySelectorAll('[data-fdel3]').forEach((b) => b.addEventListener('click', async () => {
+        const x = expenses.find((y) => y.id === b.dataset.fdel3);
+        if (!x || !confirm('Ștergi această cheltuială? Acțiunea nu poate fi anulată.')) return;
+        const { error } = await sb.from('expenses').delete().eq('id', x.id);
+        if (error) return alert('Nu am putut șterge: ' + error.message);
+        if (x.file_path) await sb.storage.from('expense-docs').remove([x.file_path]);
+        reload();
+      }));
+    }
+
+    // formular generic într-o fereastră: construiește, leagă închiderea și trimite la `onSubmit(form, fail, btn, close)`
+    function modalForm(title, bodyHtml, onSubmit) {
+      const modal = document.createElement('div');
+      modal.className = 'fixed inset-0 z-50 bg-slate-900/50 flex items-end md:items-center justify-center p-0 md:p-6';
+      modal.innerHTML = `
+        <form class="bg-white w-full md:max-w-lg rounded-t-2xl md:rounded-2xl p-5 md:p-6 max-h-[92vh] overflow-y-auto" novalidate>
+          <h2 class="text-xl font-semibold text-navy-900">${title}</h2>
+          <div class="mt-4 space-y-4">${bodyHtml}</div>
+          <p class="err hidden mt-4 text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" data-cancel class="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-50">Anulează</button>
+            <button type="submit" class="px-4 py-2 rounded-lg bg-navy-900 hover:bg-navy-800 text-white disabled:opacity-60">Salvează</button>
+          </div>
+        </form>`;
+      root.appendChild(modal);
+      const form = modal.querySelector('form');
+      const err = modal.querySelector('.err');
+      const close = () => { modal.remove(); document.removeEventListener('keydown', onKey); };
+      const onKey = (e) => { if (e.key === 'Escape') close(); };
+      document.addEventListener('keydown', onKey);
+      modal.addEventListener('mousedown', (e) => { if (e.target === modal) close(); });
+      modal.querySelector('[data-cancel]').addEventListener('click', close);
+      const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        err.classList.add('hidden');
+        const btn = form.querySelector('[type="submit"]');
+        await onSubmit(form, fail, btn, close);
+        btn.disabled = false;
+      });
+    }
+
+    const fld = (name, label, val, type = 'text', extra = '') =>
+      `<label class="block"><span class="block text-sm font-medium mb-1">${label}</span><input name="${name}" type="${type}" value="${esc(val == null ? '' : val)}" ${extra} class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></label>`;
+    const fileFld = (label) =>
+      `<label class="block"><span class="block text-sm font-medium mb-1">${label}</span><input name="file" type="file" accept="image/*,application/pdf" class="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"></label>`;
+
+    async function uploadDoc(vehicleId, file, oldPath, fail) {
+      if (!file) return { path: oldPath };
+      if (file.size > 10 * 1024 * 1024) { fail('Fișierul depășește 10 MB.'); return null; }
+      const np = `${vehicleId}/${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+      const { error } = await sb.storage.from('expense-docs').upload(np, file, { contentType: file.type || 'application/octet-stream' });
+      if (error) { fail('Fișierul nu s-a încărcat: ' + error.message); return null; }
+      if (oldPath) await sb.storage.from('expense-docs').remove([oldPath]);
+      return { path: np };
+    }
+
+    function openExpenseForm(x) {
+      modalForm(x ? 'Editează cheltuiala' : 'Cheltuială nouă', `
+        <label class="block"><span class="block text-sm font-medium mb-1">Vehicul</span>
+          <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${vehicleOptions(x ? x.vehicle_id : finVehicle, false)}</select></label>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="block"><span class="block text-sm font-medium mb-1">Categorie</span>
+            <select name="category" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              ${Object.entries(EXP_CAT).map(([k, l]) => `<option value="${k}" ${x && x.category === k ? 'selected' : ''}>${l}</option>`).join('')}
+            </select></label>
+          ${fld('amount', 'Sumă (€)', x && x.amount, 'number', 'min="0" step="0.01" inputmode="decimal"')}
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${fld('date', 'Data', x ? x.expense_date : todayStr(), 'date')}
+          ${fld('supplier', 'Furnizor', x && x.supplier)}
+        </div>
+        ${fld('description', 'Descriere', x && x.description)}
+        ${fileFld('Factură (PDF sau poză, maximum 10 MB)' + (x && x.file_path ? ' – lasă gol ca să păstrezi fișierul actual' : ''))}`,
+      async (form, fail, btn, close) => {
+        if (!form.vehicle.value) return fail('Alege vehiculul.');
+        if (form.amount.value === '' || Number(form.amount.value) < 0) return fail('Completează suma.');
+        if (!form.date.value) return fail('Completează data.');
+        btn.disabled = true;
+        const up = await uploadDoc(form.vehicle.value, form.file.files[0], x ? x.file_path : null, fail);
+        if (!up) return;
+        const payload = {
+          vehicle_id: form.vehicle.value, category: form.category.value, amount: Number(form.amount.value),
+          expense_date: form.date.value, supplier: form.supplier.value.trim() || null,
+          description: form.description.value.trim() || null, file_path: up.path
+        };
+        const { error } = x ? await sb.from('expenses').update(payload).eq('id', x.id) : await sb.from('expenses').insert(payload);
+        if (error) return fail('Nu am putut salva: ' + error.message);
+        finVehicle = payload.vehicle_id;
+        close(); reload();
+      });
+    }
+
+    // ----- Service -----
+    const jobLevel = (j) => {
+      if (j.status === 'done') return 'green';
+      if (!j.scheduled_date) return 'none';
+      const n = daysUntil(j.scheduled_date);
+      return n < 0 ? 'red' : n <= 14 ? 'yellow' : 'none';
+    };
+
+    function paintService() {
+      if (finError) { $view.innerHTML = needMigration('Service', '004_finance_service.sql', finError); return; }
+      const list = jobs.filter((j) => svcFilter === 'all' || j.status === svcFilter)
+        .sort((x, y) => {
+          const dx = (x.status === 'done' ? x.done_date : x.scheduled_date) || '9999-12-31';
+          const dy = (y.status === 'done' ? y.done_date : y.scheduled_date) || '9999-12-31';
+          return x.status === 'done' ? (dx < dy ? 1 : -1) : (dx < dy ? -1 : 1);
+        });
+      const chips = [['planned', 'Programate'], ['done', 'Efectuate'], ['all', 'Toate']];
+
+      $view.innerHTML = `
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-semibold text-navy-900">Service</h1>
+            <p class="text-muted">Revizii, schimb de ulei, reparații: programări, costuri și facturi.</p>
+          </div>
+          <button data-jadd class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2 shrink-0">Lucrare nouă</button>
+        </div>
+        <div class="mt-5 flex flex-wrap gap-2 text-sm">
+          ${chips.map(([k, l]) => `<button data-jf="${k}" class="px-3 py-1.5 rounded-full ${svcFilter === k ? 'bg-navy-900 text-white' : 'bg-white border border-slate-200 text-muted hover:bg-slate-50'}">${l}</button>`).join('')}
+        </div>
+        <div class="mt-4 space-y-3">
+          ${list.length ? list.map((j) => `
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+              <div class="flex items-start gap-3">
+                <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${DOT[jobLevel(j)]}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline gap-x-2">
+                    <h2 class="font-semibold text-navy-900">${esc(plateOf(j.vehicle_id))}</h2>
+                    <span class="text-ink">${esc(j.kind)}</span>
+                  </div>
+                  <p class="text-sm text-muted">${j.status === 'done'
+                    ? 'Efectuat ' + (j.done_date ? fmtDate(j.done_date) : '')
+                    : (j.scheduled_date ? 'Programat ' + fmtDate(j.scheduled_date) + (daysUntil(j.scheduled_date) < 0 ? ' (întârziat)' : '') : 'Fără dată')}${j.km != null ? ' · ' + nf(j.km) + ' km' : ''}${j.cost != null ? ' · ' + eur(j.cost) : ''}${j.workshop ? ' · ' + esc(j.workshop) : ''}</p>
+                  ${j.notes ? `<p class="mt-1 text-sm text-slate-700 break-words">${esc(j.notes)}</p>` : ''}
+                </div>
+              </div>
+              <div class="mt-3 flex flex-wrap gap-2">
+                ${j.status === 'planned' ? `<button data-jdone="${j.id}" class="text-sm px-3 py-1.5 rounded-lg bg-navy-900 text-white hover:bg-navy-800">Marchează efectuat</button>` : ''}
+                ${j.file_path ? `<button data-jfile="${esc(j.file_path)}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Factură</button>` : ''}
+                <button data-jedit="${j.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Editează</button>
+                <button data-jdel="${j.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+              </div>
+            </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nicio lucrare. Programează prima lucrare de service.</p>'}
+        </div>`;
+
+      $view.querySelector('[data-jadd]').addEventListener('click', () => openJobForm(null, false));
+      $view.querySelectorAll('[data-jf]').forEach((b) => b.addEventListener('click', () => { svcFilter = b.dataset.jf; paint(); }));
+      $view.querySelectorAll('[data-jfile]').forEach((b) => b.addEventListener('click', () => openFile('expense-docs', b.dataset.jfile)));
+      $view.querySelectorAll('[data-jedit]').forEach((b) =>
+        b.addEventListener('click', () => openJobForm(jobs.find((x) => x.id === b.dataset.jedit), false)));
+      $view.querySelectorAll('[data-jdone]').forEach((b) =>
+        b.addEventListener('click', () => openJobForm(jobs.find((x) => x.id === b.dataset.jdone), true)));
+      $view.querySelectorAll('[data-jdel]').forEach((b) => b.addEventListener('click', async () => {
+        const j = jobs.find((x) => x.id === b.dataset.jdel);
+        if (!j || !confirm('Ștergi această lucrare? Acțiunea nu poate fi anulată.')) return;
+        const { error } = await sb.from('service_jobs').delete().eq('id', j.id);
+        if (error) return alert('Nu am putut șterge: ' + error.message);
+        if (j.file_path) await sb.storage.from('expense-docs').remove([j.file_path]);
+        reload();
+      }));
+    }
+
+    function openJobForm(j, markDone) {
+      const status = markDone ? 'done' : (j ? j.status : 'planned');
+      modalForm(j ? (markDone ? 'Marchează efectuat' : 'Editează lucrarea') : 'Lucrare nouă', `
+        <label class="block"><span class="block text-sm font-medium mb-1">Vehicul</span>
+          <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${vehicleOptions(j ? j.vehicle_id : '', false)}</select></label>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <label class="block"><span class="block text-sm font-medium mb-1">Tip lucrare</span>
+            <select name="kind" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              ${SVC_KINDS.map((k) => `<option ${j && j.kind === k ? 'selected' : ''}>${k}</option>`).join('')}
+            </select></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Stare</span>
+            <select name="status" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              <option value="planned" ${status === 'planned' ? 'selected' : ''}>Programată</option>
+              <option value="done" ${status === 'done' ? 'selected' : ''}>Efectuată</option>
+            </select></label>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${fld('scheduled', 'Data programată', j && j.scheduled_date, 'date')}
+          ${fld('done', 'Data efectuării', j && j.done_date ? j.done_date : (markDone ? todayStr() : ''), 'date')}
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          ${fld('km', 'Kilometraj', j && j.km, 'number', 'min="0" inputmode="numeric"')}
+          ${fld('cost', 'Cost (€)', j && j.cost, 'number', 'min="0" step="0.01" inputmode="decimal"')}
+        </div>
+        ${fld('workshop', 'Atelier', j && j.workshop)}
+        <label class="block"><span class="block text-sm font-medium mb-1">Notițe</span>
+          <textarea name="notes" rows="2" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5">${j ? esc(j.notes || '') : ''}</textarea></label>
+        ${fileFld('Factură (PDF sau poză, maximum 10 MB)' + (j && j.file_path ? ' – lasă gol ca să păstrezi fișierul actual' : ''))}
+        <p class="text-xs text-muted">Pentru „Schimb ulei" efectuat, cu kilometraj completat, kilometrajul de la ultima schimbare de ulei al vehiculului se actualizează automat.</p>`,
+      async (form, fail, btn, close) => {
+        if (!form.vehicle.value) return fail('Alege vehiculul.');
+        const st = form.status.value;
+        if (st === 'planned' && !form.scheduled.value) return fail('Completează data programată.');
+        if (st === 'done' && !form.done.value) return fail('Completează data efectuării.');
+        btn.disabled = true;
+        const up = await uploadDoc(form.vehicle.value, form.file.files[0], j ? j.file_path : null, fail);
+        if (!up) return;
+        const num = (v) => (v === '' ? null : Number(v));
+        const payload = {
+          vehicle_id: form.vehicle.value, kind: form.kind.value, status: st,
+          scheduled_date: form.scheduled.value || null, done_date: st === 'done' ? form.done.value : null,
+          km: form.km.value === '' ? null : Math.round(Number(form.km.value)), cost: num(form.cost.value),
+          workshop: form.workshop.value.trim() || null, notes: form.notes.value.trim() || null, file_path: up.path
+        };
+        const { error } = j ? await sb.from('service_jobs').update(payload).eq('id', j.id) : await sb.from('service_jobs').insert(payload);
+        if (error) return fail('Nu am putut salva: ' + error.message);
+        if (st === 'done' && payload.kind === 'Schimb ulei' && payload.km != null) {
+          const v = vehicles.find((x) => x.id === payload.vehicle_id);
+          const patch = { last_oil_change_km: payload.km };
+          if (v && (v.current_km == null || v.current_km < payload.km)) patch.current_km = payload.km;
+          await sb.from('vehicles').update(patch).eq('id', payload.vehicle_id);
+        }
+        close(); reload();
       });
     }
 
