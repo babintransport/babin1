@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Flotă – Autentificare</title>
-  <meta name="theme-color" content="#0B2545">
+  <meta name="theme-color" content="#102A49">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -24,8 +24,9 @@
         extend: {
           fontFamily: { sans: ['Barlow', 'system-ui', 'sans-serif'] },
           colors: {
-            navy: { 900: '#0B2545', 800: '#13315C', 700: '#1B427A' },
-            signal: { green: '#2E9E5B', yellow: '#E5B100', red: '#D64545' }
+            navy: { 900: '#102A49', 800: '#183A5C', 700: '#245080' },
+            signal: { green: '#16834A', yellow: '#F0A020', red: '#D64545' },
+            surface: '#F4F6F8', ink: '#172B45', muted: '#718096'
           }
         }
       }
@@ -45,28 +46,25 @@
   </style>
 </head>
 
-<body class="bg-white font-sans text-slate-800 antialiased">
+<body class="bg-surface font-sans text-ink antialiased">
 
   <!-- ====== ECRAN AUTENTIFARE (login + cod 2FA) ====== -->
   <main id="authScreen" class="min-h-full grid md:grid-cols-[minmax(320px,5fr)_7fr]">
 
     <!-- Panou stânga: identitate -->
     <aside class="bg-navy-900 text-white px-6 py-8 md:p-12 flex md:flex-col md:justify-between items-center md:items-stretch gap-6">
-      <div class="flex md:flex-col gap-2" aria-hidden="true">
-        <span class="w-4 h-4 md:w-7 md:h-7 rounded-full bg-signal-red"></span>
-        <span class="w-4 h-4 md:w-7 md:h-7 rounded-full bg-signal-yellow"></span>
-        <span class="w-4 h-4 md:w-7 md:h-7 rounded-full bg-signal-green"></span>
-      </div>
+      <img src="icons/logo-white.png" alt="Babin Transport" class="h-10 md:h-20 w-auto self-start">
       <div>
         <h1 class="text-2xl md:text-5xl font-semibold tracking-tight">Managementul flotei</h1>
         <p class="hidden md:block mt-4 text-slate-300 max-w-sm leading-relaxed">
           TÜV, ulei, anvelope, alimentări și defecțiuni. Toate vehiculele, într-un singur loc.
         </p>
+        <p class="hidden md:block mt-6 italic text-signal-green font-medium">Mereu în mișcare!</p>
       </div>
     </aside>
 
     <!-- Panou dreapta: formulare -->
-    <section class="flex items-center justify-center px-6 py-10">
+    <section class="flex items-center justify-center px-6 py-10 bg-white">
       <div class="w-full max-w-sm">
 
         <!-- Pasul A: email + parolă -->

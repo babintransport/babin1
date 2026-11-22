@@ -30,12 +30,12 @@
     let loading = true, loadError = '', notice = '', lastVehicle = '';
 
     root.innerHTML = `
-      <style>.tab-btn[aria-current="page"] { color: #0B2545; font-weight: 600; box-shadow: inset 0 2px 0 #0B2545; }</style>
-      <div class="min-h-full bg-slate-50">
+      <style>.tab-btn[aria-current="page"] { color: #16834A; font-weight: 600; box-shadow: inset 0 2px 0 #16834A; }</style>
+      <div class="min-h-full bg-surface">
         <header class="bg-navy-900 text-white px-4 py-3 flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <div class="font-semibold">Flotă</div>
-            <div class="text-xs text-slate-300 truncate">${esc(profile.email)}</div>
+            <img src="icons/logo-white.png" alt="Babin Transport" class="h-8 w-auto">
+            <div class="text-xs text-slate-300 truncate mt-1">${esc(profile.email)}</div>
           </div>
           <button data-logout class="text-sm bg-white/10 rounded-lg px-3 py-1.5 shrink-0">Deconectare</button>
         </header>

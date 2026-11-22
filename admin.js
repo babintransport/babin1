@@ -63,63 +63,87 @@
     </div>`;
 
   // ---------- Structura panoului ----------
+  const ICONS = {
+    dashboard: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+    vehicles: '<path d="M1 6h13v10H1z"/><path d="M14 9h4l3 3v4h-7z"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
+    alerts: '<path d="M6 8a6 6 0 0112 0c0 7 3 8 3 8H3s3-1 3-8"/><path d="M10 20a2 2 0 004 0"/>',
+    tasks: '<path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V7a2 2 0 012-2h9"/>',
+    defects: '<path d="M12 3l10 18H2z"/><path d="M12 10v5M12 18h.01"/>',
+    fuel: '<path d="M12 3s7 7 7 12a7 7 0 01-14 0c0-5 7-12 7-12z"/>',
+    drivers: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
+    chat: '<path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-5.4A8 8 0 1121 12z"/>',
+    map: '<path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+    euro: '<path d="M18 6a7 7 0 100 12M4 10h9M4 14h9"/>'
+  };
+  const svgIcon = (id, cls = 'w-5 h-5') =>
+    `<svg class="${cls} shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[id] || ''}</svg>`;
+
+  const NAV = [
+    ['dashboard', 'Prezentare generală', 'Start'],
+    ['vehicles', 'Flotă', 'Flotă'],
+    ['alerts', 'Centru de alerte', 'Alerte'],
+    ['tasks', 'Task-uri', 'Task-uri'],
+    ['defects', 'Defecțiuni', 'Defecțiuni'],
+    ['fuel', 'Combustibil', 'Combustibil'],
+    ['drivers', 'Istoric șoferi', 'Șoferi'],
+    ['chat', 'Chat', 'Chat'],
+    ...(MAP_ON ? [['map', 'Hartă live', 'Hartă']] : [])
+  ];
+
   const navBtn = (id, label) =>
-    `<button data-nav="${id}" class="nav-btn text-left px-3 py-2 rounded-lg hover:bg-white/10">${label}</button>`;
+    `<button data-nav="${id}" class="nav-btn flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-slate-200 hover:bg-white/10">${svgIcon(id)}<span>${label}</span></button>`;
   const tabBtn = (id, label) =>
-    `<button data-nav="${id}" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">${label}</button>`;
+    `<button data-nav="${id}" class="tab-btn py-2 px-3 shrink-0 text-xs text-slate-500 flex flex-col items-center gap-0.5">${svgIcon(id)}<span>${label}</span></button>`;
 
   const shell = (email) => `
     <style>
-      .nav-btn[aria-current="page"] { background: rgba(255,255,255,.14); font-weight: 600; }
-      .tab-btn[aria-current="page"] { color: #0B2545; font-weight: 600; box-shadow: inset 0 2px 0 #0B2545; }
+      .nav-btn[aria-current="page"] { background: #16834A; color: #fff; font-weight: 600; }
+      .tab-btn[aria-current="page"] { color: #16834A; font-weight: 600; box-shadow: inset 0 2px 0 #16834A; }
+      .bar { transition: opacity .15s; } .bar:hover { opacity: .75; }
     </style>
-    <div class="min-h-full md:flex bg-slate-50">
-      <aside class="hidden md:flex md:flex-col md:w-64 md:sticky md:top-0 md:h-screen bg-navy-900 text-white p-5 gap-6">
-        <div class="flex items-center gap-2">
-          <span class="flex gap-1" aria-hidden="true"><i class="w-2.5 h-2.5 rounded-full bg-signal-red"></i><i class="w-2.5 h-2.5 rounded-full bg-signal-yellow"></i><i class="w-2.5 h-2.5 rounded-full bg-signal-green"></i></span>
-          <span class="font-semibold">Managementul flotei</span>
-        </div>
-        <nav class="flex flex-col gap-1">
-          ${navBtn('alerts', 'Centru de alerte')}
-          ${navBtn('vehicles', 'Vehicule')}
-          ${navBtn('tasks', 'Task-uri')}
-          ${navBtn('defects', 'Defecțiuni')}
-          ${navBtn('fuel', 'Combustibil')}
-          ${navBtn('chat', 'Chat')}
-          ${navBtn('drivers', 'Istoric șoferi')}
-          ${MAP_ON ? navBtn('map', 'Hartă live') : ''}
-        </nav>
-        <div class="mt-auto text-sm">
-          <div class="text-slate-300 truncate">${esc(email)}</div>
-          <button data-logout class="mt-2 w-full bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">Deconectare</button>
+    <div class="min-h-full md:flex bg-surface">
+      <aside class="hidden md:flex md:flex-col md:w-64 md:sticky md:top-0 md:h-screen bg-navy-900 text-white p-4 gap-5">
+        <div class="px-2 pt-2"><img src="icons/logo-white.png" alt="Babin Transport" class="w-40 h-auto"></div>
+        <nav class="flex flex-col gap-1 overflow-y-auto">${NAV.map(([id, label]) => navBtn(id, label)).join('')}</nav>
+        <div class="mt-auto px-2 text-sm">
+          <p class="italic text-signal-green font-medium">Mereu în mișcare!</p>
+          <button data-logout class="mt-3 w-full bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">Deconectare</button>
+          <p class="mt-3 text-xs text-slate-400">v2.0</p>
         </div>
       </aside>
 
       <div class="flex-1 min-w-0">
-        <header class="md:hidden bg-navy-900 text-white px-4 py-3 flex items-center justify-between">
-          <span class="font-semibold">Managementul flotei</span>
-          <button data-logout class="text-sm bg-white/10 rounded-lg px-3 py-1.5">Deconectare</button>
+        <header class="flex items-center justify-between gap-3 px-4 md:px-8 py-3 bg-white border-b border-slate-100">
+          <img src="icons/logo-navy.png" alt="Babin Transport" class="h-8 w-auto md:hidden">
+          <p class="hidden md:block text-sm text-muted capitalize">${new Date().toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+          <div class="flex items-center gap-3">
+            <button data-nav="alerts" class="relative p-2 rounded-full hover:bg-slate-100 text-navy-800" aria-label="Alerte">
+              ${svgIcon('alerts', 'w-6 h-6')}
+              <span id="bellCount" class="hidden absolute -top-0.5 -right-0.5 min-w-[1.1rem] h-[1.1rem] px-1 rounded-full bg-signal-red text-white text-[11px] font-semibold items-center justify-center"></span>
+            </button>
+            <div class="hidden sm:flex items-center gap-2">
+              <span class="w-9 h-9 rounded-full bg-signal-green text-white font-semibold flex items-center justify-center">${esc(email.charAt(0).toUpperCase())}</span>
+              <div class="leading-tight">
+                <div class="text-sm font-medium text-ink max-w-[11rem] truncate">${esc(email)}</div>
+                <div class="text-xs text-muted">Administrator</div>
+              </div>
+            </div>
+            <button data-logout class="md:hidden text-sm border border-slate-300 rounded-lg px-3 py-1.5">Ieșire</button>
+          </div>
         </header>
-        <main id="adminView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-5xl"></main>
+        <main id="adminView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-6xl"></main>
       </div>
 
       <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex overflow-x-auto"
            style="padding-bottom:env(safe-area-inset-bottom,0px)">
-        ${tabBtn('alerts', 'Alerte')}
-        ${tabBtn('vehicles', 'Vehicule')}
-        ${tabBtn('tasks', 'Task-uri')}
-        ${tabBtn('defects', 'Defecțiuni')}
-        ${tabBtn('fuel', 'Combustibil')}
-        ${tabBtn('chat', 'Chat')}
-        ${tabBtn('drivers', 'Șoferi')}
-        ${MAP_ON ? tabBtn('map', 'Hartă') : ''}
+        ${NAV.map(([id, , short]) => tabBtn(id, short)).join('')}
       </nav>
     </div>`;
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
     let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [];
-    let view = 'alerts';
+    let view = 'dashboard';
     let fuelRange = 'all';
     let chatCleanup = null;
     let histVehicle = '', histDriver = '', lookup = { vid: '', t: '' };
@@ -141,6 +165,12 @@
       openChat: () => { view = 'chat'; paint(); }
     });
 
+    function updateBell() {
+      const n = vehicles.filter((v) => statusOf(v).worst === 'red').length + defects.filter((d) => d.status === 'new').length;
+      const el = root.querySelector('#bellCount');
+      if (el) { el.textContent = n > 99 ? '99+' : n; el.classList.toggle('hidden', !n); el.classList.toggle('flex', !!n); }
+    }
+
     async function reload() {
       loading = true; paint();
       const [v, t, u, d, f, h] = await Promise.all([
@@ -155,6 +185,7 @@
       const err = v.error || t.error || u.error || d.error || f.error || h.error;
       loadError = err ? 'Nu am putut încărca datele: ' + err.message : '';
       vehicles = v.data || []; tasks = t.data || []; people = u.data || []; defects = d.data || []; fuel = f.data || []; drives = h.data || [];
+      updateBell();
       paint();
     }
 
@@ -164,7 +195,8 @@
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
-      if (view === 'alerts') paintAlerts();
+      if (view === 'dashboard') paintDashboard();
+      else if (view === 'alerts') paintAlerts();
       else if (view === 'vehicles') paintVehicles();
       else if (view === 'tasks') paintTasks();
       else if (view === 'defects') paintDefects();
@@ -179,6 +211,183 @@
         <p class="text-slate-600">Nu ai niciun vehicul încă.</p>
         <button data-add class="mt-3 rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă primul vehicul</button>
       </div>`;
+
+    // ----- Prezentare generală -----
+    let dashMonths = 6;
+
+    function paintDashboard() {
+      const rows = vehicles.map((v) => ({ v, st: statusOf(v) }));
+      const count = (lvl) => rows.filter((r) => r.st.worst === lvl).length;
+      const urgent = count('red'), attention = count('yellow'), fine = count('green');
+      const openTasks = tasks.filter((t) => t.status !== 'done').length;
+      const openDefects = defects.filter((d) => d.status !== 'resolved').length;
+
+      // combustibil pe luni (din alimentările reale)
+      const mKey = (d) => { const x = new Date(d); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0'); };
+      const agg = {};
+      fuel.forEach((l) => {
+        const k = mKey(l.created_at);
+        const o = agg[k] || (agg[k] = { liters: 0, cost: 0 });
+        o.liters += Number(l.liters); o.cost += Number(l.total_price);
+      });
+      const now = new Date();
+      const cur = agg[mKey(now)] || { liters: 0, cost: 0 };
+      const prev = agg[mKey(new Date(now.getFullYear(), now.getMonth() - 1, 1))] || { liters: 0, cost: 0 };
+      const trend = (c, p) => {
+        if (!(p > 0)) return '';
+        const d = Math.round(((c - p) / p) * 100);
+        return `<span class="${d > 0 ? 'text-signal-red' : 'text-signal-green'}">${d > 0 ? '↑' : '↓'} ${Math.abs(d)}% față de luna trecută</span>`;
+      };
+
+      const kpi = (icon, tone, value, label, sub) => `
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex items-center gap-4">
+          <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${tone}">${svgIcon(icon, 'w-6 h-6')}</div>
+          <div class="min-w-0">
+            <div class="text-2xl font-semibold text-ink leading-tight">${value}</div>
+            <div class="text-sm text-muted">${label}</div>
+            ${sub ? `<div class="text-xs mt-0.5">${sub}</div>` : ''}
+          </div>
+        </div>`;
+
+      // vehicule după gravitatea alertei
+      const worstText = (st) => {
+        const hit = [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire]].find(([, x]) => x.level === st.worst);
+        return hit ? `${hit[0]}: ${hit[1].text}` : 'Fără date pentru alerte';
+      };
+      const fleetRows = [...rows].sort((a, b) => LEVEL[a.st.worst] - LEVEL[b.st.worst]).slice(0, 6);
+
+      // avertizări
+      const alerts = [];
+      rows.forEach(({ v, st }) => [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire]].forEach(([label, s]) => {
+        if (s.level === 'red' || s.level === 'yellow') alerts.push({ level: s.level, title: `${label} · ${v.plate_number}`, text: s.text });
+      }));
+      defects.filter((d) => d.status === 'new').forEach((d) =>
+        alerts.push({ level: 'red', title: `Defecțiune · ${plateOf(d.vehicle_id)}`, text: d.description }));
+      alerts.sort((a, b) => LEVEL[a.level] - LEVEL[b.level]);
+
+      // activitate recentă
+      const ev = [];
+      fuel.slice(0, 10).forEach((l) => ev.push({ t: l.created_at, text: `Alimentare ${plateOf(l.vehicle_id)}: ${n1(l.liters, 0)} L, ${eur(l.total_price)}` }));
+      defects.slice(0, 10).forEach((d) => ev.push({ t: d.created_at, text: `Defecțiune raportată: ${plateOf(d.vehicle_id)}${d.category ? ' (' + d.category + ')' : ''}` }));
+      tasks.slice(0, 10).forEach((t) => ev.push({ t: t.created_at, text: `Task nou: ${t.title}` }));
+      drives.slice(0, 10).forEach((h) => ev.push({ t: h.start_time, text: `${emailOf(h.user_id)} a preluat ${plateOf(h.vehicle_id)}` }));
+      ev.sort((x, y) => new Date(y.t) - new Date(x.t));
+      const when = (d) => {
+        const x = new Date(d);
+        return x.toDateString() === now.toDateString()
+          ? x.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })
+          : x.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+      };
+
+      // grafic: cost combustibil pe luni
+      const months = [];
+      for (let i = dashMonths - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const o = agg[mKey(d)] || { liters: 0, cost: 0 };
+        months.push({ label: d.toLocaleDateString('ro-RO', { month: 'short' }).replace('.', ''), cost: o.cost, liters: o.liters });
+      }
+      const chart = () => {
+        const W = 560, H = 230, L = 52, R = 8, T = 12, B = 28;
+        const max = Math.max(...months.map((m) => m.cost), 0);
+        if (!max) return '<p class="text-sm text-muted py-10 text-center">Nu există alimentări în această perioadă.</p>';
+        const mag = Math.pow(10, Math.floor(Math.log10(max / 4)));
+        const step = Math.ceil(max / 4 / mag) * mag, top = step * 4;
+        const iw = (W - L - R) / months.length, bw = Math.min(40, iw * 0.55);
+        const y = (v) => T + (H - T - B) * (1 - v / top);
+        let grid = '';
+        for (let i = 0; i <= 4; i++) {
+          const v = step * i;
+          grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E5E9EF"/>` +
+                  `<text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#718096">${nf(Math.round(v))} €</text>`;
+        }
+        const bars = months.map((m, i) => {
+          const x = L + iw * i + (iw - bw) / 2;
+          return `<g><rect class="bar" x="${x}" y="${y(m.cost)}" width="${bw}" height="${(H - T - B) * (m.cost / top)}" rx="4" fill="#16834A">` +
+                 `<title>${esc(m.label)}: ${eur(m.cost)} · ${n1(m.liters, 0)} L</title></rect>` +
+                 `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#718096">${esc(m.label)}</text></g>`;
+        }).join('');
+        return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="Cheltuieli cu combustibilul pe luni">${grid}${bars}</svg>`;
+      };
+
+      const card = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-5';
+      const linkBtn = (go, label) => `<button data-go="${go}" class="text-sm text-signal-green font-medium hover:underline">${label} →</button>`;
+      const pill = (lvl) => lvl === 'red'
+        ? '<span class="text-xs font-medium px-2.5 py-1 rounded-full bg-red-50 text-signal-red">Urgent</span>'
+        : '<span class="text-xs font-medium px-2.5 py-1 rounded-full bg-amber-50 text-signal-yellow">Atenție</span>';
+
+      $view.innerHTML = `
+        <div class="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h1 class="text-2xl md:text-3xl font-semibold text-navy-900">Bună ziua!</h1>
+            <p class="text-muted">Iată situația flotei tale astăzi.</p>
+          </div>
+        </div>
+
+        <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          ${kpi('vehicles', 'bg-blue-50 text-navy-800', rows.length, 'Vehicule în flotă', `<span class="text-muted">${fine} fără probleme</span>`)}
+          ${kpi('alerts', 'bg-red-50 text-signal-red', urgent, 'Alerte urgente', `<span class="text-muted">${attention} de urmărit</span>`)}
+          ${kpi('tasks', 'bg-green-50 text-signal-green', openTasks, 'Task-uri deschise', '')}
+          ${kpi('defects', 'bg-amber-50 text-signal-yellow', openDefects, 'Defecțiuni nerezolvate', '')}
+          ${kpi('fuel', 'bg-blue-50 text-navy-800', n1(cur.liters, 0) + ' L', 'Combustibil luna aceasta', trend(cur.liters, prev.liters))}
+          ${kpi('euro', 'bg-green-50 text-signal-green', eur(cur.cost), 'Cost combustibil luna aceasta', trend(cur.cost, prev.cost))}
+        </div>
+
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">
+          <section class="${card}">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Flota mea</h2>${linkBtn('vehicles', 'Toate vehiculele')}</div>
+            ${fleetRows.length ? fleetRows.map(({ v, st }) => `
+              <div class="flex items-center gap-3 py-2.5 border-t border-slate-100 first:border-0">
+                <span class="w-3 h-3 rounded-full shrink-0 ${DOT[st.worst]}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-ink">${esc(v.plate_number)} <span class="text-muted font-normal">${esc(v.model || '')}</span></div>
+                  <div class="text-sm text-muted truncate">${esc(worstText(st))}</div>
+                </div>
+                <div class="text-sm text-muted shrink-0">${v.current_km != null ? nf(v.current_km) + ' km' : ''}</div>
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nu ai vehicule încă. Adaugă-le din pagina Flotă.</p>'}
+          </section>
+
+          <section class="${card}">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="font-semibold text-navy-900">Avertizări <span class="ml-1 text-xs px-2 py-0.5 rounded-full bg-red-50 text-signal-red">${alerts.length}</span></h2>
+              ${linkBtn('alerts', 'Vezi toate')}
+            </div>
+            ${alerts.length ? alerts.slice(0, 6).map((x) => `
+              <div class="flex items-center gap-3 py-2.5 border-t border-slate-100 first:border-0">
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-ink">${esc(x.title)}</div>
+                  <div class="text-sm text-muted truncate">${esc(x.text)}</div>
+                </div>
+                ${pill(x.level)}
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nicio avertizare. Totul este în regulă.</p>'}
+          </section>
+
+          <section class="${card}">
+            <div class="flex items-center justify-between mb-3">
+              <h2 class="font-semibold text-navy-900">Cheltuieli cu combustibilul</h2>
+              <div class="flex gap-1 text-sm">
+                ${[6, 12].map((n) => `<button data-months="${n}" class="px-3 py-1 rounded-full ${dashMonths === n ? 'bg-navy-900 text-white' : 'text-muted hover:bg-slate-100'}">${n} luni</button>`).join('')}
+              </div>
+            </div>
+            ${chart()}
+            <p class="mt-2 text-xs text-muted">Calculat din alimentările înregistrate de șoferi. Alte cheltuieli (service, asigurări) vor apărea după modulul Finanțe.</p>
+          </section>
+
+          <section class="${card}">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Ultimele activități</h2>${linkBtn('fuel', 'Combustibil')}</div>
+            ${ev.length ? ev.slice(0, 8).map((x) => `
+              <div class="flex items-start gap-3 py-2 text-sm">
+                <span class="mt-1.5 w-2 h-2 rounded-full bg-signal-green shrink-0"></span>
+                <span class="text-muted w-12 shrink-0">${when(x.t)}</span>
+                <span class="text-ink break-words min-w-0">${esc(x.text)}</span>
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nicio activitate încă.</p>'}
+          </section>
+        </div>`;
+
+      $view.querySelectorAll('[data-go]').forEach((b) =>
+        b.addEventListener('click', () => { view = b.dataset.go; paint(); window.scrollTo(0, 0); }));
+      $view.querySelectorAll('[data-months]').forEach((b) =>
+        b.addEventListener('click', () => { dashMonths = Number(b.dataset.months); paint(); }));
+    }
 
     // ----- Centru de alerte -----
     function paintAlerts() {
