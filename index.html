@@ -127,6 +127,23 @@
           </div>
         </form>
 
+        <!-- Pasul C: cod din aplicația Authenticator -->
+        <form id="totpForm" class="hidden space-y-5" novalidate>
+          <div>
+            <h2 class="text-2xl font-semibold text-navy-900">Autentificare în doi pași</h2>
+            <p class="mt-1 text-slate-500">Introdu codul de 6 cifre din aplicația Authenticator.</p>
+          </div>
+          <div>
+            <label for="totp" class="block text-sm font-medium mb-1">Cod Authenticator</label>
+            <input id="totp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" required
+                   class="field w-full rounded-lg border border-slate-300 px-3 py-3 text-center text-2xl tracking-[0.5em]" placeholder="••••••">
+          </div>
+          <p id="totpError" class="hidden text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <button id="totpBtn" type="submit" class="w-full rounded-lg bg-navy-900 hover:bg-navy-800 text-white font-medium py-3 disabled:opacity-60">Verifică codul</button>
+          <button type="button" id="totpBack" class="text-sm text-slate-500 hover:text-navy-900">Înapoi la autentificare</button>
+        </form>
+
+
       </div>
     </section>
   </main>
@@ -200,7 +217,7 @@
   }
 
   function showLogin() {
-    hide($('otpForm')); show($('loginForm')); show($('authScreen')); hide($('appScreen'));
+    hide($('otpForm')); hide($('totpForm')); show($('loginForm')); show($('authScreen')); hide($('appScreen'));
     $('password').value = ''; $('otp').value = '';
     setError($('loginError'), ''); setError($('otpError'), '');
     clearInterval(resendTimer);
@@ -241,7 +258,7 @@
     // Fără 2FA: intrăm direct după parolă
     if (!REQUIRE_2FA) {
       setBusy($('loginBtn'), false, 'Continuă');
-      return enterApp(pwData.user);
+      return afterAuth(pwData.user, true);
     }
 
     // 2) renunțăm la sesiunea obținută doar cu parola (scope local = nu deconectează alte dispozitive)
@@ -268,7 +285,7 @@
     setBusy($('otpBtn'), false, 'Verifică codul');
     if (error) return setError($('otpError'), friendlyError(error));
 
-    await enterApp(data.user);
+    await afterAuth(data.user, true);
   });
 
   $('resendBtn').addEventListener('click', async () => {
@@ -287,15 +304,55 @@
     $('togglePw').textContent = visible ? 'Arată' : 'Ascunde';
   });
 
+  /* ---------- Roluri, istoric autentificări și al doilea factor (Authenticator) ---------- */
+  const PORTAL_ROLES = ['super_admin', 'admin', 'manager', 'accountant', 'mechanic'];
+
+  async function afterAuth(user, isLogin) {
+    if (isLogin) sb.from('login_events').insert({ user_agent: navigator.userAgent.slice(0, 300) }).then(() => {}, () => {});
+    const { data: aal } = await sb.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aal && aal.nextLevel === 'aal2' && aal.currentLevel !== 'aal2') return showTotp();
+    return enterApp(user);
+  }
+
+  function showTotp() {
+    hide($('loginForm')); hide($('otpForm')); show($('totpForm')); show($('authScreen')); hide($('appScreen'));
+    $('totp').value = ''; setError($('totpError'), '');
+    $('totp').focus();
+  }
+
+  $('totpForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    setError($('totpError'), '');
+    const code = $('totp').value.replace(/\s/g, '');
+    if (code.length !== 6) return setError($('totpError'), 'Introdu cele 6 cifre din aplicația Authenticator.');
+
+    setBusy($('totpBtn'), true, 'Verifică codul');
+    const done = (msg) => { setBusy($('totpBtn'), false, 'Verifică codul'); setError($('totpError'), msg); };
+
+    const { data: f, error: fe } = await sb.auth.mfa.listFactors();
+    const factor = f && f.totp && f.totp[0];
+    if (fe || !factor) return done('Nu am găsit factorul de autentificare al contului.');
+    const { data: ch, error: ce } = await sb.auth.mfa.challenge({ factorId: factor.id });
+    if (ce) return done('Nu am putut porni verificarea. Încearcă din nou.');
+    const { error: ve } = await sb.auth.mfa.verify({ factorId: factor.id, challengeId: ch.id, code });
+    if (ve) return done('Cod greșit sau expirat. Încearcă din nou.');
+
+    setBusy($('totpBtn'), false, 'Verifică codul');
+    const { data: { user } } = await sb.auth.getUser();
+    enterApp(user);
+  });
+
+  $('totpBack').addEventListener('click', async () => { await sb.auth.signOut({ scope: 'local' }); showLogin(); });
+
   /* ---------- După autentificare: citim rolul din tabelul "users" ---------- */
   async function enterApp(user) {
     const { data: profile, error } = await sb
       .from('users')
-      .select('id, email, role')
+      .select('*')
       .eq('id', user.id)
       .maybeSingle();
 
-    if (error || !profile || !['admin', 'employee'].includes(profile.role)) {
+    if (error || !profile || ![...PORTAL_ROLES, 'employee'].includes(profile.role)) {
       console.error('Citire rol din tabelul users:', error, profile);
       await sb.auth.signOut({ scope: 'local' });
       showLogin();
@@ -306,7 +363,7 @@
     hide($('authScreen')); show($('appScreen'));
     $('welcome').textContent = `Bun venit, ${profile.email}`;
 
-    if (profile.role === 'admin') {
+    if (PORTAL_ROLES.includes(profile.role)) {
       hide($('appHeader')); hide($('appPlaceholder')); show($('adminRoot'));
       window.AdminPanel.mount({ sb, profile, root: $('adminRoot'), onLogout: doLogout });
     } else {
@@ -325,7 +382,7 @@
   /* ---------- La pornire: dacă există deja o sesiune validă (după 2FA), intrăm direct ---------- */
   (async () => {
     const { data: { session } } = await sb.auth.getSession();
-    if (session) await enterApp(session.user);
+    if (session) await afterAuth(session.user, false);
   })();
 
   /* ---------- PWA: service worker ---------- */

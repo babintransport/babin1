@@ -14,6 +14,24 @@
   // Harta PAJ rămâne ascunsă până setezi ENABLE_MAP: true în config.js
   const MAP_ON = !!(window.APP_CONFIG && window.APP_CONFIG.ENABLE_MAP);
 
+  const ROLE_LABEL = { super_admin: 'Super Administrator', admin: 'Administrator', manager: 'Manager', accountant: 'Contabil', mechanic: 'Mecanic', employee: 'Șofer' };
+  const ADMIN_ROLES = ['super_admin', 'admin'];
+  const OPS_ROLES = ['super_admin', 'admin', 'manager'];
+  // Pagini vizibile pe rol (administratorii le văd pe toate). Permisiunile reale sunt impuse și pe server (RLS).
+  const PAGES = {
+    manager: ['dashboard', 'vehicles', 'trips', 'documents', 'service', 'finance', 'alerts', 'tasks', 'defects', 'fuel', 'drivers', 'chat', 'map', 'security'],
+    accountant: ['dashboard', 'finance', 'fuel', 'service', 'documents', 'vehicles', 'chat', 'security'],
+    mechanic: ['service', 'defects', 'vehicles', 'documents', 'alerts', 'chat', 'security']
+  };
+  // Cine poate modifica date pe fiecare pagină (ceilalți văd doar)
+  const PAGE_WRITE = {
+    vehicles: OPS_ROLES, trips: OPS_ROLES, tasks: OPS_ROLES, drivers: OPS_ROLES, documents: OPS_ROLES, fuel: OPS_ROLES,
+    service: [...OPS_ROLES, 'mechanic'], defects: [...OPS_ROLES, 'mechanic'], finance: ['super_admin', 'admin', 'accountant']
+  };
+  const WRITE_SEL = '[data-add],[data-edit],[data-del],[data-tadd],[data-tedit],[data-tdel],[data-tstatus],[data-dstatus],[data-ddel],[data-fdel],' +
+    '[data-hadd],[data-hedit],[data-hdel],[data-hend],[data-dadd],[data-dedit],[data-ddel2],[data-tadd2],[data-tedit2],[data-tcancel],[data-tdel2],' +
+    '[data-fadd],[data-fedit],[data-fdel3],[data-jadd],[data-jdone],[data-jedit],[data-jdel]';
+
   const LEVEL = { red: 0, yellow: 1, green: 2, none: 3 };
   const DOT = { red: 'bg-signal-red', yellow: 'bg-signal-yellow', green: 'bg-signal-green', none: 'bg-slate-300' };
   const TIRE = { vara: 'Vară', iarna: 'Iarnă', 'all-season': 'All-season' };
@@ -99,6 +117,9 @@
     drivers: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
     chat: '<path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-5.4A8 8 0 1121 12z"/>',
     map: '<path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+    security: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
+    users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20a7 7 0 0114 0M16 4.5a3.5 3.5 0 010 7M22 20a7 7 0 00-4-6"/>',
+    audit: '<path d="M9 4h6a1 1 0 011 1v1H8V5a1 1 0 011-1z"/><path d="M8 6H6a2 2 0 00-2 2v11a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-2M8 12h8M8 16h5"/>',
     euro: '<path d="M18 6a7 7 0 100 12M4 10h9M4 14h9"/>',
     finance: '<path d="M18 6a7 7 0 100 12M4 10h9M4 14h9"/>',
     service: '<path d="M14.7 6.3a4 4 0 00-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 005.4-5.4l-2.5 2.5-2.3-.7-.7-2.3z"/>',
@@ -121,15 +142,20 @@
     ['fuel', 'Combustibil', 'Combustibil'],
     ['drivers', 'Istoric șoferi', 'Șoferi'],
     ['chat', 'Chat', 'Chat'],
+    ['security', 'Securitate', 'Securitate'],
+    ['users', 'Utilizatori', 'Utilizatori'],
+    ['audit', 'Audit', 'Audit'],
     ...(MAP_ON ? [['map', 'Hartă live', 'Hartă']] : [])
   ];
+
+  const navFor = (role) => (ADMIN_ROLES.includes(role) ? NAV : NAV.filter(([id]) => (PAGES[role] || ['security']).includes(id)));
 
   const navBtn = (id, label) =>
     `<button data-nav="${id}" class="nav-btn flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-slate-200 hover:bg-white/10">${svgIcon(id)}<span>${label}</span></button>`;
   const tabBtn = (id, label) =>
     `<button data-nav="${id}" class="tab-btn py-2 px-3 shrink-0 text-xs text-slate-500 flex flex-col items-center gap-0.5">${svgIcon(id)}<span>${label}</span></button>`;
 
-  const shell = (email) => `
+  const shell = (email, role) => `
     <style>
       .nav-btn[aria-current="page"] { background: #16834A; color: #fff; font-weight: 600; }
       .tab-btn[aria-current="page"] { color: #16834A; font-weight: 600; box-shadow: inset 0 2px 0 #16834A; }
@@ -139,7 +165,7 @@
     <div class="min-h-full md:flex bg-surface">
       <aside class="hidden md:flex md:flex-col md:w-64 md:sticky md:top-0 md:h-screen bg-navy-900 text-white p-4 gap-5">
         <div class="px-2 pt-2"><img src="icons/logo-white.png" alt="Babin Transport" class="w-40 h-auto"></div>
-        <nav class="flex flex-col gap-1 overflow-y-auto">${NAV.map(([id, label]) => navBtn(id, label)).join('')}</nav>
+        <nav class="flex flex-col gap-1 overflow-y-auto">${navFor(role).map(([id, label]) => navBtn(id, label)).join('')}</nav>
         <div class="mt-auto px-2 text-sm">
           <p class="italic text-signal-green font-medium">Mereu în mișcare!</p>
           <button data-logout class="mt-3 w-full bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">Deconectare</button>
@@ -160,7 +186,7 @@
               <span class="w-9 h-9 rounded-full bg-signal-green text-white font-semibold flex items-center justify-center">${esc(email.charAt(0).toUpperCase())}</span>
               <div class="leading-tight">
                 <div class="text-sm font-medium text-ink max-w-[11rem] truncate">${esc(email)}</div>
-                <div class="text-xs text-muted">Administrator</div>
+                <div class="text-xs text-muted">${esc(ROLE_LABEL[role] || role)}</div>
               </div>
             </div>
             <button data-logout class="md:hidden text-sm border border-slate-300 rounded-lg px-3 py-1.5">Ieșire</button>
@@ -171,14 +197,15 @@
 
       <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex overflow-x-auto"
            style="padding-bottom:env(safe-area-inset-bottom,0px)">
-        ${NAV.map(([id, , short]) => tabBtn(id, short)).join('')}
+        ${navFor(role).map(([id, , short]) => tabBtn(id, short)).join('')}
       </nav>
     </div>`;
 
   // ---------- Panoul ----------
   function mount({ sb, profile, root, onLogout }) {
     let vehicles = [], tasks = [], people = [], defects = [], fuel = [], drives = [], docs = [], trips = [], expenses = [], jobs = [];
-    let view = 'dashboard';
+    const ROLE = profile.role;
+    let view = navFor(ROLE)[0][0];
     let fuelRange = 'all';
     let chatCleanup = null;
     let histVehicle = '', histDriver = '', lookup = { vid: '', t: '' };
@@ -187,7 +214,7 @@
     let loading = true;
     let loadError = '';
 
-    root.innerHTML = shell(profile.email);
+    root.innerHTML = shell(profile.email, ROLE);
     const $view = root.querySelector('#adminView');
 
     root.querySelectorAll('[data-nav]').forEach((b) =>
@@ -201,6 +228,13 @@
       isViewingChat: () => view === 'chat',
       openChat: () => { view = 'chat'; paint(); }
     });
+
+    // ascunde acțiunile de modificare pe paginile unde rolul curent are doar drept de citire
+    function applyPerms() {
+      const allowed = PAGE_WRITE[view];
+      if (!allowed || allowed.includes(ROLE)) return;
+      $view.querySelectorAll(WRITE_SEL).forEach((el) => { if (el.tagName === 'SELECT') el.disabled = true; else el.remove(); });
+    }
 
     function updateBell() {
       const n = vehicles.filter((v) => statusOf(v).worst === 'red').length + defects.filter((d) => d.status === 'new').length;
@@ -250,13 +284,17 @@
       else if (view === 'tasks') paintTasks();
       else if (view === 'defects') paintDefects();
       else if (view === 'fuel') paintFuel();
-      else if (view === 'chat') chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: true });
+      else if (view === 'chat') chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: ADMIN_ROLES.includes(ROLE) });
       else if (view === 'drivers') paintHistory();
       else if (view === 'documents') paintDocs();
       else if (view === 'trips') paintTrips();
       else if (view === 'finance') paintFinance();
       else if (view === 'service') paintService();
+      else if (view === 'security') paintSecurity();
+      else if (view === 'users') paintUsers();
+      else if (view === 'audit') paintAudit();
       else chatCleanup = paintMap();
+      applyPerms();
     }
 
     const emptyState = () => `
@@ -1122,6 +1160,174 @@
         close();
         reload();
       });
+    }
+
+    // ----- Securitate (Authenticator) -----
+    async function paintSecurity() {
+      const head = '<h1 class="text-2xl font-semibold text-navy-900">Securitate</h1>';
+      $view.innerHTML = head + '<p class="mt-4 text-muted">Se încarcă…</p>';
+      const { data, error } = await sb.auth.mfa.listFactors();
+      if (view !== 'security') return;
+      if (error) { $view.innerHTML = head + `<p class="mt-4 rounded-lg bg-red-50 text-signal-red px-4 py-3 text-sm">${esc(error.message)}</p>`; return; }
+      const verified = (data && data.totp) || [];
+      const card = 'mt-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-5';
+
+      if (verified.length) {
+        $view.innerHTML = head + `
+          <section class="${card}">
+            <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-signal-green"></span><h2 class="font-semibold text-navy-900">Autentificarea în doi pași este activă</h2></div>
+            <p class="mt-2 text-sm text-muted">La fiecare autentificare ți se cere codul din aplicația Authenticator, iar serverul refuză accesul fără el.</p>
+            <button data-mfaoff class="mt-4 text-sm px-4 py-2 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Dezactivează</button>
+          </section>`;
+        $view.querySelector('[data-mfaoff]').addEventListener('click', async () => {
+          if (!confirm('Dezactivezi autentificarea în doi pași? Contul va fi mai puțin protejat.')) return;
+          const { error: e } = await sb.auth.mfa.unenroll({ factorId: verified[0].id });
+          if (e) return alert('Nu am putut dezactiva: ' + e.message);
+          paintSecurity();
+        });
+        return;
+      }
+
+      $view.innerHTML = head + `
+        <section class="${card}">
+          <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-full bg-signal-yellow"></span><h2 class="font-semibold text-navy-900">Autentificarea în doi pași nu este activă</h2></div>
+          <p class="mt-2 text-sm text-muted">Recomandat pentru conturile cu acces la date financiare și administrare. Ai nevoie de o aplicație Authenticator (Google Authenticator, Microsoft Authenticator, Authy).</p>
+          <button data-mfaon class="mt-4 rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Activează</button>
+          <div id="mfaBox"></div>
+        </section>`;
+      $view.querySelector('[data-mfaon]').addEventListener('click', async (ev) => {
+        ev.target.disabled = true;
+        for (const f of (data && data.all) || []) if (f.status === 'unverified') await sb.auth.mfa.unenroll({ factorId: f.id });
+        const { data: en, error: ee } = await sb.auth.mfa.enroll({ factorType: 'totp', friendlyName: 'Authenticator ' + Date.now() });
+        if (ee) { ev.target.disabled = false; return alert('Nu am putut porni activarea: ' + ee.message); }
+        $view.querySelector('#mfaBox').innerHTML = `
+          <div class="mt-5 border-t border-slate-100 pt-5">
+            <p class="text-sm text-ink">1. Scanează codul QR cu aplicația Authenticator (sau introdu manual cheia).</p>
+            <img src="${en.totp.qr_code}" alt="Cod QR" class="mt-3 w-44 h-44 bg-white border border-slate-200 rounded-lg p-2">
+            <p class="mt-2 text-xs text-muted break-all">Cheie manuală: <span class="font-mono">${esc(en.totp.secret)}</span></p>
+            <p class="mt-4 text-sm text-ink">2. Introdu codul de 6 cifre afișat de aplicație.</p>
+            <div class="mt-2 flex gap-2">
+              <input id="mfaCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••"
+                     class="field w-40 rounded-lg border border-slate-300 px-3 py-2.5 text-center tracking-[0.4em]">
+              <button id="mfaVerify" class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2 disabled:opacity-60">Confirmă</button>
+            </div>
+            <p id="mfaErr" class="hidden mt-2 text-sm text-signal-red"></p>
+            <p class="mt-4 text-xs text-muted">Dacă pierzi telefonul, accesul se recuperează din Supabase (SQL Editor). Instrucțiunile sunt la finalul fișierului 005_security.sql.</p>
+          </div>`;
+        const err = $view.querySelector('#mfaErr');
+        $view.querySelector('#mfaVerify').addEventListener('click', async (e2) => {
+          const code = $view.querySelector('#mfaCode').value.replace(/\s/g, '');
+          err.classList.add('hidden');
+          if (code.length !== 6) { err.textContent = 'Introdu cele 6 cifre.'; err.classList.remove('hidden'); return; }
+          e2.target.disabled = true;
+          const { data: ch, error: ce } = await sb.auth.mfa.challenge({ factorId: en.id });
+          const { error: ve } = ce ? { error: ce } : await sb.auth.mfa.verify({ factorId: en.id, challengeId: ch.id, code });
+          e2.target.disabled = false;
+          if (ve) { err.textContent = 'Cod greșit sau expirat. Încearcă din nou.'; err.classList.remove('hidden'); return; }
+          alert('Autentificarea în doi pași este activă.');
+          paintSecurity();
+        });
+      });
+    }
+
+    // ----- Utilizatori și permisiuni -----
+    function paintUsers() {
+      const order = ['employee', 'mechanic', 'accountant', 'manager', 'admin', 'super_admin'];
+      const isSuper = ROLE === 'super_admin';
+      const editable = (p) => p.id !== profile.id && (isSuper || !ADMIN_ROLES.includes(p.role));
+      const legend = [
+        ['Șofer', 'doar propriile curse, task-uri, alimentări și defecțiuni'],
+        ['Mecanic', 'service, defecțiuni; vehicule și documente doar citire'],
+        ['Contabil', 'finanțe; combustibil, service și documente doar citire'],
+        ['Manager', 'toate operațiunile; finanțele doar citire'],
+        ['Administrator', 'tot, mai puțin gestionarea administratorilor'],
+        ['Super Administrator', 'tot, inclusiv administratorii']
+      ];
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Utilizatori</h1>
+        <p class="text-muted">Alege rolul fiecărui cont. Permisiunile sunt verificate și pe server.</p>
+        <div class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-100">
+          ${[...people].sort((x, y) => x.email.localeCompare(y.email)).map((p) => `
+            <div class="flex flex-wrap items-center gap-3 px-4 py-3 border-t border-slate-100 first:border-0">
+              <div class="min-w-0 flex-1 font-medium text-ink truncate">${esc(p.email)}${p.id === profile.id ? ' <span class="text-xs text-muted font-normal">(tu)</span>' : ''}</div>
+              <select data-urole="${p.id}" ${editable(p) ? '' : 'disabled'} class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+                ${order.map((r) => `<option value="${r}" ${p.role === r ? 'selected' : ''} ${ADMIN_ROLES.includes(r) && !isSuper && p.role !== r ? 'disabled' : ''}>${ROLE_LABEL[r]}</option>`).join('')}
+              </select>
+            </div>`).join('')}
+        </div>
+        <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-5">
+          <h2 class="font-semibold text-navy-900 mb-2">Ce poate face fiecare rol</h2>
+          ${legend.map(([r, t]) => `<p class="text-sm py-1"><span class="font-medium text-ink">${r}:</span> <span class="text-muted">${t}</span></p>`).join('')}
+        </section>
+        <p class="mt-4 text-sm text-muted">Conturile noi se creează în Supabase: Authentication → Users → Add user (cu „Auto Confirm User"). Apar aici automat, cu rolul Șofer.</p>`;
+      $view.querySelectorAll('[data-urole]').forEach((sel) => sel.addEventListener('change', async () => {
+        const { error: e } = await sb.from('users').update({ role: sel.value }).eq('id', sel.dataset.urole);
+        if (e) alert('Nu am putut schimba rolul: ' + e.message);
+        else { const p = people.find((x) => x.id === sel.dataset.urole); if (p) p.role = sel.value; }
+        paint();
+      }));
+    }
+
+    // ----- Audit și autentificări -----
+    let auditTable = '';
+    async function paintAudit() {
+      $view.innerHTML = '<h1 class="text-2xl font-semibold text-navy-900">Audit</h1><p class="mt-4 text-muted">Se încarcă…</p>';
+      const [al, le] = await Promise.all([
+        sb.from('audit_log').select('*').order('at', { ascending: false }).limit(300),
+        sb.from('login_events').select('*').order('at', { ascending: false }).limit(50)
+      ]);
+      if (view !== 'audit') return;
+      if (al.error) { $view.innerHTML = needMigration('Audit', '005_security.sql', al.error.message); return; }
+
+      const TABLES = { vehicles: 'Vehicule', trips: 'Curse', tasks: 'Task-uri', fuel_logs: 'Alimentări', defects: 'Defecțiuni', driver_history: 'Istoric șoferi', vehicle_documents: 'Documente', service_jobs: 'Service', expenses: 'Cheltuieli', users: 'Utilizatori' };
+      const ACTION = { INSERT: ['Adăugat', 'bg-green-50 text-signal-green'], UPDATE: ['Modificat', 'bg-blue-50 text-navy-800'], DELETE: ['Șters', 'bg-red-50 text-signal-red'] };
+      const NAME_KEYS = ['plate_number', 'title', 'kind', 'doc_type', 'category', 'description', 'email', 'message'];
+      const who = (r) => (r.user_email ? r.user_email.split('@')[0] : 'sistem');
+      const val = (v) => (v == null || v === '' ? '–' : String(typeof v === 'object' ? JSON.stringify(v) : v).slice(0, 28));
+      const name = (r) => { const d = r.new_data || r.old_data || {}; const k = NAME_KEYS.find((x) => d[x]); return k ? String(d[k]).slice(0, 60) : String(r.record_id || '').slice(0, 8); };
+      const changes = (r) => {
+        if (r.action !== 'UPDATE') return '';
+        const o = r.old_data || {}, n = r.new_data || {};
+        const diff = Object.keys(n).filter((k) => JSON.stringify(n[k]) !== JSON.stringify(o[k]));
+        return diff.slice(0, 4).map((k) => `${k}: ${val(o[k])} → ${val(n[k])}`).join(' · ') + (diff.length > 4 ? ' …' : '');
+      };
+      const device = (ua) => (/Android/i.test(ua || '') ? 'Android' : /iPhone|iPad/i.test(ua || '') ? 'iPhone / iPad' : /Windows/i.test(ua || '') ? 'Windows' : /Mac/i.test(ua || '') ? 'Mac' : 'Alt dispozitiv');
+      const rows = (al.data || []).filter((r) => !auditTable || r.table_name === auditTable);
+      const card = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-5';
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Audit</h1>
+        <p class="text-muted">Cine a adăugat, modificat sau șters date, și autentificările recente.</p>
+        <div class="mt-5">
+          <select id="auditTable" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            <option value="">Toate secțiunile</option>
+            ${Object.entries(TABLES).map(([k, l]) => `<option value="${k}" ${auditTable === k ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <section class="mt-4 ${card}">
+          <h2 class="font-semibold text-navy-900 mb-3">Modificări (ultimele 300)</h2>
+          ${rows.length ? rows.map((r) => `
+            <div class="py-2.5 border-t border-slate-100 first:border-0 text-sm">
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span class="text-muted w-32 shrink-0">${fmtDT(r.at)}</span>
+                <span class="font-medium text-ink">${esc(who(r))}</span>
+                <span class="text-xs font-medium px-2 py-0.5 rounded-full ${ACTION[r.action][1]}">${ACTION[r.action][0]}</span>
+                <span class="text-muted">${esc(TABLES[r.table_name] || r.table_name)}</span>
+                <span class="text-ink truncate min-w-0">${esc(name(r))}</span>
+              </div>
+              ${changes(r) ? `<div class="mt-1 text-xs text-muted break-words">${esc(changes(r))}</div>` : ''}
+            </div>`).join('') : '<p class="text-sm text-muted py-4 text-center">Nicio modificare înregistrată încă.</p>'}
+        </section>
+        <section class="mt-4 ${card}">
+          <h2 class="font-semibold text-navy-900 mb-3">Autentificări recente</h2>
+          ${le.error ? `<p class="text-sm text-muted">${esc(le.error.message)}</p>` : ((le.data || []).length ? le.data.map((x) => `
+            <div class="flex flex-wrap gap-x-3 py-2 border-t border-slate-100 first:border-0 text-sm">
+              <span class="text-muted w-32 shrink-0">${fmtDT(x.at)}</span>
+              <span class="font-medium text-ink">${esc(emailOf(x.user_id))}</span>
+              <span class="text-muted">${device(x.user_agent)}</span>
+            </div>`).join('') : '<p class="text-sm text-muted py-4 text-center">Nicio autentificare înregistrată încă.</p>')}
+        </section>`;
+      $view.querySelector('#auditTable').addEventListener('change', (e) => { auditTable = e.target.value; paintAudit(); });
     }
 
     // ----- Finanțe -----
