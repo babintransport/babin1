@@ -49,6 +49,7 @@
           <button data-nav="defects" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Defecțiuni</button>
           <button data-nav="checks" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Verificare</button>
           <button data-nav="docs" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Documente</button>
+          <button data-nav="messages" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Mesaje</button>
           <button data-nav="chat" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Chat</button>
         </nav>
       </div>`;
@@ -56,12 +57,18 @@
     const $view = root.querySelector('#empView');
     root.querySelector('[data-logout]').addEventListener('click', () => {
       window.ChatNotifier.stop();
+      window.MessagesNotifier.stop();
       onLogout();
     });
     window.ChatNotifier.start({
       sb, profile, root,
       isViewingChat: () => view === 'chat',
       openChat: () => { view = 'chat'; notice = ''; paint(); }
+    });
+    window.MessagesNotifier.start({
+      sb, profile, root,
+      isViewingMessages: () => view === 'messages',
+      openMessages: () => { view = 'messages'; notice = ''; paint(); }
     });
     root.querySelectorAll('[data-nav]').forEach((b) =>
       b.addEventListener('click', () => { view = b.dataset.nav; notice = ''; paint(); window.scrollTo(0, 0); }));
@@ -99,6 +106,7 @@
       else if (view === 'tasks') paintTasks();
       else if (view === 'fuel') paintFuel();
       else if (view === 'defects') paintDefects();
+      else if (view === 'messages') chatCleanup = window.Messages.mount($view, { sb, profile });
       else chatCleanup = window.ChatView.mount($view, { sb, profile, isAdmin: false });
     }
 

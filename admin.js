@@ -19,9 +19,9 @@
   const OPS_ROLES = ['super_admin', 'admin', 'manager'];
   // Pagini vizibile pe rol (administratorii le văd pe toate). Permisiunile reale sunt impuse și pe server (RLS).
   const PAGES = {
-    manager: ['dashboard', 'vehicles', 'trips', 'documents', 'service', 'finance', 'alerts', 'tasks', 'defects', 'fuel', 'drivers', 'checks', 'driverdocs', 'chat', 'map', 'security'],
-    accountant: ['dashboard', 'finance', 'fuel', 'service', 'documents', 'driverdocs', 'vehicles', 'chat', 'security'],
-    mechanic: ['service', 'defects', 'checks', 'vehicles', 'documents', 'alerts', 'chat', 'security']
+    manager: ['dashboard', 'vehicles', 'trips', 'documents', 'service', 'finance', 'alerts', 'tasks', 'defects', 'fuel', 'drivers', 'checks', 'driverdocs', 'chat', 'messages', 'map', 'security'],
+    accountant: ['dashboard', 'finance', 'fuel', 'service', 'documents', 'driverdocs', 'vehicles', 'chat', 'messages', 'security'],
+    mechanic: ['service', 'defects', 'checks', 'vehicles', 'documents', 'alerts', 'chat', 'messages', 'security']
   };
   // Cine poate modifica date pe fiecare pagină (ceilalți văd doar)
   const PAGE_WRITE = {
@@ -119,6 +119,7 @@
     map: '<path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
     checks: '<path d="M9 4h6a1 1 0 011 1v1H8V5a1 1 0 011-1z"/><path d="M8 6H6a2 2 0 00-2 2v11a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-2M9 14l2 2 4-4"/>',
     driverdocs: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
+    messages: '<path d="M3 6h18v12H3z"/><path d="M3 7l9 6 9-6"/>',
     security: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
     users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20a7 7 0 0114 0M16 4.5a3.5 3.5 0 010 7M22 20a7 7 0 00-4-6"/>',
     audit: '<path d="M9 4h6a1 1 0 011 1v1H8V5a1 1 0 011-1z"/><path d="M8 6H6a2 2 0 00-2 2v11a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-2M8 12h8M8 16h5"/>',
@@ -146,6 +147,7 @@
     ['checks', 'Verificări vehicule', 'Verificări'],
     ['driverdocs', 'Documente șoferi', 'CMR'],
     ['chat', 'Chat', 'Chat'],
+    ['messages', 'Mesaje', 'Mesaje'],
     ['security', 'Securitate', 'Securitate'],
     ['users', 'Utilizatori', 'Utilizatori'],
     ['audit', 'Audit', 'Audit'],
@@ -225,12 +227,18 @@
       b.addEventListener('click', () => { view = b.dataset.nav; paint(); window.scrollTo(0, 0); }));
     root.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', () => {
       window.ChatNotifier.stop();
+      window.MessagesNotifier.stop();
       onLogout();
     }));
     window.ChatNotifier.start({
       sb, profile, root,
       isViewingChat: () => view === 'chat',
       openChat: () => { view = 'chat'; paint(); }
+    });
+    window.MessagesNotifier.start({
+      sb, profile, root,
+      isViewingMessages: () => view === 'messages',
+      openMessages: () => { view = 'messages'; paint(); }
     });
 
     // ascunde acțiunile de modificare pe paginile unde rolul curent are doar drept de citire
@@ -299,6 +307,7 @@
       else if (view === 'audit') paintAudit();
       else if (view === 'checks') paintChecks();
       else if (view === 'driverdocs') paintDriverDocs();
+      else if (view === 'messages') chatCleanup = window.Messages.mount($view, { sb, profile });
       else chatCleanup = paintMap();
       applyPerms();
     }
