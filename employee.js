@@ -47,6 +47,8 @@
           <button data-nav="tasks" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Task-uri</button>
           <button data-nav="fuel" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Alimentări</button>
           <button data-nav="defects" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Defecțiuni</button>
+          <button data-nav="checks" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Verificare</button>
+          <button data-nav="docs" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Documente</button>
           <button data-nav="chat" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Chat</button>
         </nav>
       </div>`;
@@ -92,6 +94,8 @@
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
       if (view === 'home') paintHome();
       else if (view === 'trips') paintTrips();
+      else if (view === 'checks') paintChecks();
+      else if (view === 'docs') paintDocs();
       else if (view === 'tasks') paintTasks();
       else if (view === 'fuel') paintFuel();
       else if (view === 'defects') paintDefects();
@@ -366,6 +370,206 @@
         if (error) return show('Nu am putut schimba parola: ' + error.message, false);
         form.pw.value = '';
         show('Parola a fost schimbată.', true);
+      });
+    }
+
+    // ---------- Fișiere private (poze, documente) ----------
+    async function openDriverFile(path) {
+      const isImg = /\.(jpe?g|png|webp|gif)$/i.test(path || '');
+      const w = isImg ? null : window.open('', '_blank');
+      const { data, error } = await sb.storage.from('driver-docs').createSignedUrl(path, 300);
+      if (error || !data) { if (w) w.close(); return alert('Nu am putut deschide fișierul.'); }
+      if (!isImg) { if (w) w.location = data.signedUrl; else window.location = data.signedUrl; return; }
+      const m = document.createElement('div');
+      m.className = 'fixed inset-0 z-50 bg-slate-900/80 flex items-center justify-center p-4';
+      m.innerHTML = `<img src="${data.signedUrl}" alt="Poză" class="max-h-[85vh] max-w-full rounded-lg">`;
+      m.addEventListener('click', () => m.remove());
+      document.body.appendChild(m);
+    }
+
+    async function uploadDriverFile(file, folder) {
+      const isImg = (file.type || '').startsWith('image/');
+      const blob = isImg ? await compress(file) : file;
+      const ext = isImg && blob.type === 'image/jpeg' ? 'jpg' : ((file.name.split('.').pop() || 'bin').toLowerCase());
+      const path = `${profile.id}/${folder}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`;
+      const { error } = await sb.storage.from('driver-docs').upload(path, blob, { contentType: blob.type || file.type || 'application/octet-stream' });
+      return error ? { error } : { path };
+    }
+
+    const migrationNotice = (title, script) =>
+      `<h1 class="text-2xl font-semibold text-navy-900">${title}</h1><p class="mt-4 rounded-lg bg-amber-50 text-slate-700 px-4 py-3 text-sm">Modulul nu este activat încă. Spune administratorului să ruleze scriptul ${script}.</p>`;
+
+    // ---------- Verificare vehicul ----------
+    const CHECK_ITEMS = [['tires', 'Anvelope', 'Anvelope'], ['lights', 'Lumini', 'Lumini'], ['brakes', 'Frâne', 'Frâne'], ['oil', 'Ulei și lichide', 'Motor'], ['body', 'Caroserie', 'Caroserie'], ['other', 'Alte verificări', 'Altele']];
+
+    async function paintChecks() {
+      $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>';
+      const { data: past, error } = await sb.from('vehicle_checks').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(10);
+      if (view !== 'checks') return;
+      if (error) { $view.innerHTML = migrationNotice('Verificare vehicul', '006_driver_portal.sql'); return; }
+      const start = lastVehicle || (myOpen ? myOpen.vehicle_id : '');
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Verificare vehicul</h1>
+        ${notice ? `<p class="mt-3 text-sm rounded-lg bg-green-50 text-signal-green px-3 py-2">${esc(notice)}</p>` : ''}
+        ${vehicles.length ? `
+        <form id="chkForm" class="mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4" novalidate>
+          <label class="block"><span class="block text-sm font-medium mb-1">Vehicul</span>
+            <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              <option value="">Alege vehiculul</option>
+              ${vehicles.map((v) => `<option value="${v.id}" ${v.id === start ? 'selected' : ''}>${esc(v.plate_number)}${v.model ? ' – ' + esc(v.model) : ''}</option>`).join('')}
+            </select></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Kilometraj (opțional)</span>
+            <input name="km" type="number" min="0" inputmode="numeric" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></label>
+          <div class="space-y-3">
+            ${CHECK_ITEMS.map(([k, label]) => `
+              <div>
+                <div class="text-sm font-medium mb-1">${label}</div>
+                <div class="flex gap-2">
+                  <label class="flex-1"><input type="radio" name="chk_${k}" value="ok" checked class="peer sr-only"><span class="block text-center py-2 rounded-lg border border-slate-300 peer-checked:bg-signal-green peer-checked:text-white peer-checked:border-signal-green">În regulă</span></label>
+                  <label class="flex-1"><input type="radio" name="chk_${k}" value="problem" class="peer sr-only"><span class="block text-center py-2 rounded-lg border border-slate-300 peer-checked:bg-signal-red peer-checked:text-white peer-checked:border-signal-red">Problemă</span></label>
+                </div>
+              </div>`).join('')}
+          </div>
+          <label class="block"><span class="block text-sm font-medium mb-1">Notițe (obligatoriu dacă ai marcat o problemă)</span>
+            <textarea name="notes" rows="3" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></textarea></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Fotografii (maximum 4)</span>
+            <input name="photos" type="file" accept="image/*" multiple capture="environment"
+                   class="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"></label>
+          <p id="chkErr" class="hidden text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <button type="submit" class="w-full rounded-lg bg-navy-900 hover:bg-navy-800 text-white font-medium py-3 disabled:opacity-60">Trimite verificarea</button>
+        </form>` : '<p class="mt-4 rounded-xl border border-dashed border-slate-300 p-6 text-center text-slate-500">Nu există vehicule. Cere administratorului să le adauge.</p>'}
+
+        <h2 class="mt-8 mb-3 font-semibold text-slate-600">Verificările mele</h2>
+        <div class="space-y-2">
+          ${(past || []).length ? past.map((c) => `
+            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-medium text-navy-900">${esc(plateOf(c.vehicle_id))}</span>
+                <span class="flex items-center gap-1.5 text-slate-600"><i class="w-2.5 h-2.5 rounded-full ${c.has_problem ? 'bg-signal-red' : 'bg-signal-green'}"></i>${c.has_problem ? 'Cu probleme' : 'În regulă'}</span>
+              </div>
+              <p class="text-slate-400">${fmtDT(c.created_at)}${c.km != null ? ' · ' + nf(c.km) + ' km' : ''}</p>
+            </div>`).join('') : '<p class="text-sm text-slate-400">Nicio verificare trimisă încă.</p>'}
+        </div>`;
+
+      const form = $view.querySelector('#chkForm');
+      if (!form) return;
+      const err = $view.querySelector('#chkErr');
+      const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+      form.vehicle.addEventListener('change', () => { lastVehicle = form.vehicle.value; });
+
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        err.classList.add('hidden');
+        const v = vehicles.find((x) => x.id === form.vehicle.value);
+        if (!v) return fail('Alege vehiculul.');
+        const items = {}, problems = [];
+        CHECK_ITEMS.forEach(([k, label, cat]) => {
+          items[k] = form['chk_' + k].value;
+          if (items[k] === 'problem') problems.push([label, cat]);
+        });
+        const notes = form.notes.value.trim();
+        if (problems.length && notes.length < 3) return fail('Descrie problema în notițe.');
+        const files = [...form.photos.files].slice(0, 4);
+
+        const btn = form.querySelector('[type="submit"]');
+        const reset = () => { btn.disabled = false; btn.textContent = 'Trimite verificarea'; };
+        btn.disabled = true; btn.textContent = 'Se trimite…';
+
+        const photos = [];
+        for (const f of files) {
+          const up = await uploadDriverFile(f, 'checks');
+          if (up.error) { reset(); return fail('O poză nu s-a încărcat: ' + up.error.message); }
+          photos.push(up.path);
+        }
+        const { error: insErr } = await sb.from('vehicle_checks').insert({
+          vehicle_id: v.id, km: form.km.value === '' ? null : Math.round(Number(form.km.value)),
+          items, has_problem: problems.length > 0, notes: notes || null, photos
+        });
+        if (insErr) { reset(); return fail('Nu am putut trimite verificarea: ' + insErr.message); }
+
+        // problemele devin automat defecțiuni, ca administratorul să le vadă în Defecțiuni
+        for (const [label, cat] of problems) {
+          await sb.from('defects').insert({ vehicle_id: v.id, category: cat, description: `Verificare vehicul – ${label}: ${notes}` });
+        }
+        lastVehicle = v.id;
+        notice = problems.length ? 'Verificarea a fost trimisă. Problemele au fost raportate ca defecțiuni.' : 'Verificarea a fost trimisă. Drum bun!';
+        await load(false);
+        if (view === 'checks') paintChecks();
+      });
+    }
+
+    // ---------- Documente (CMR, dovezi de livrare, fotografii) ----------
+    const DOC_TYPES = ['CMR', 'Dovadă livrare', 'Fotografie', 'Altele'];
+
+    async function paintDocs() {
+      $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>';
+      const { data: mine, error } = await sb.from('driver_documents').select('*').eq('user_id', profile.id).order('created_at', { ascending: false }).limit(30);
+      if (view !== 'docs') return;
+      if (error) { $view.innerHTML = migrationNotice('Documente', '006_driver_portal.sql'); return; }
+      const tripOpts = trips.filter((t) => t.status !== 'cancelled').slice(-10).reverse();
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Documente</h1>
+        ${notice ? `<p class="mt-3 text-sm rounded-lg bg-green-50 text-signal-green px-3 py-2">${esc(notice)}</p>` : ''}
+        <form id="docForm" class="mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4" novalidate>
+          <label class="block"><span class="block text-sm font-medium mb-1">Tip document</span>
+            <select name="type" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">${DOC_TYPES.map((t) => `<option>${t}</option>`).join('')}</select></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Cursă (opțional)</span>
+            <select name="trip" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              <option value="">Fără cursă</option>
+              ${tripOpts.map((t) => `<option value="${t.id}">${esc(t.title)} · ${fmtDT(t.scheduled_at)}</option>`).join('')}
+            </select></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Vehicul (opțional)</span>
+            <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
+              <option value="">Fără vehicul</option>
+              ${vehicles.map((v) => `<option value="${v.id}" ${v.id === (lastVehicle || (myOpen && myOpen.vehicle_id)) ? 'selected' : ''}>${esc(v.plate_number)}</option>`).join('')}
+            </select></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Descriere (opțional)</span>
+            <input name="title" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5"></label>
+          <label class="block"><span class="block text-sm font-medium mb-1">Fișier (poză sau PDF)</span>
+            <input name="file" type="file" accept="image/*,application/pdf"
+                   class="block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-slate-100 file:px-3 file:py-2 file:text-slate-700"></label>
+          <p id="docErr" class="hidden text-sm rounded-lg bg-red-50 text-signal-red px-3 py-2" role="alert"></p>
+          <button type="submit" class="w-full rounded-lg bg-navy-900 hover:bg-navy-800 text-white font-medium py-3 disabled:opacity-60">Încarcă documentul</button>
+        </form>
+
+        <h2 class="mt-8 mb-3 font-semibold text-slate-600">Documentele mele</h2>
+        <div class="space-y-2">
+          ${(mine || []).length ? mine.map((d) => `
+            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm flex items-center gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="font-medium text-navy-900">${esc(d.doc_type)}${d.title ? ' · ' + esc(d.title) : ''}</div>
+                <div class="text-slate-400">${fmtDT(d.created_at)}${d.vehicle_id ? ' · ' + esc(plateOf(d.vehicle_id)) : ''}</div>
+              </div>
+              <button data-open="${esc(d.file_path)}" class="shrink-0 px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Deschide</button>
+            </div>`).join('') : '<p class="text-sm text-slate-400">Niciun document încărcat încă.</p>'}
+        </div>`;
+
+      $view.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () => openDriverFile(b.dataset.open)));
+      const form = $view.querySelector('#docForm');
+      const err = $view.querySelector('#docErr');
+      const fail = (m) => { err.textContent = m; err.classList.remove('hidden'); };
+
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        err.classList.add('hidden');
+        const file = form.file.files[0];
+        if (!file) return fail('Alege un fișier.');
+        if (file.size > 15 * 1024 * 1024) return fail('Fișierul depășește 15 MB.');
+        const btn = form.querySelector('[type="submit"]');
+        const reset = () => { btn.disabled = false; btn.textContent = 'Încarcă documentul'; };
+        btn.disabled = true; btn.textContent = 'Se încarcă…';
+
+        const up = await uploadDriverFile(file, 'docs');
+        if (up.error) { reset(); return fail('Fișierul nu s-a încărcat: ' + up.error.message); }
+        const { error: insErr } = await sb.from('driver_documents').insert({
+          doc_type: form.type.value, trip_id: form.trip.value || null, vehicle_id: form.vehicle.value || null,
+          title: form.title.value.trim() || null, file_path: up.path
+        });
+        if (insErr) { reset(); return fail('Nu am putut salva documentul: ' + insErr.message); }
+        notice = 'Documentul a fost încărcat.';
+        if (view === 'docs') paintDocs();
       });
     }
 

@@ -19,9 +19,9 @@
   const OPS_ROLES = ['super_admin', 'admin', 'manager'];
   // Pagini vizibile pe rol (administratorii le văd pe toate). Permisiunile reale sunt impuse și pe server (RLS).
   const PAGES = {
-    manager: ['dashboard', 'vehicles', 'trips', 'documents', 'service', 'finance', 'alerts', 'tasks', 'defects', 'fuel', 'drivers', 'chat', 'map', 'security'],
-    accountant: ['dashboard', 'finance', 'fuel', 'service', 'documents', 'vehicles', 'chat', 'security'],
-    mechanic: ['service', 'defects', 'vehicles', 'documents', 'alerts', 'chat', 'security']
+    manager: ['dashboard', 'vehicles', 'trips', 'documents', 'service', 'finance', 'alerts', 'tasks', 'defects', 'fuel', 'drivers', 'checks', 'driverdocs', 'chat', 'map', 'security'],
+    accountant: ['dashboard', 'finance', 'fuel', 'service', 'documents', 'driverdocs', 'vehicles', 'chat', 'security'],
+    mechanic: ['service', 'defects', 'checks', 'vehicles', 'documents', 'alerts', 'chat', 'security']
   };
   // Cine poate modifica date pe fiecare pagină (ceilalți văd doar)
   const PAGE_WRITE = {
@@ -117,6 +117,8 @@
     drivers: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/>',
     chat: '<path d="M21 12a8 8 0 01-11.6 7.1L3 21l1.9-5.4A8 8 0 1121 12z"/>',
     map: '<path d="M12 21s7-6.5 7-12a7 7 0 10-14 0c0 5.5 7 12 7 12z"/><circle cx="12" cy="9" r="2.5"/>',
+    checks: '<path d="M9 4h6a1 1 0 011 1v1H8V5a1 1 0 011-1z"/><path d="M8 6H6a2 2 0 00-2 2v11a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-2M9 14l2 2 4-4"/>',
+    driverdocs: '<path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>',
     security: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>',
     users: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20a7 7 0 0114 0M16 4.5a3.5 3.5 0 010 7M22 20a7 7 0 00-4-6"/>',
     audit: '<path d="M9 4h6a1 1 0 011 1v1H8V5a1 1 0 011-1z"/><path d="M8 6H6a2 2 0 00-2 2v11a2 2 0 002 2h12a2 2 0 002-2V8a2 2 0 00-2-2h-2M8 12h8M8 16h5"/>',
@@ -141,6 +143,8 @@
     ['defects', 'Defecțiuni', 'Defecțiuni'],
     ['fuel', 'Combustibil', 'Combustibil'],
     ['drivers', 'Istoric șoferi', 'Șoferi'],
+    ['checks', 'Verificări vehicule', 'Verificări'],
+    ['driverdocs', 'Documente șoferi', 'CMR'],
     ['chat', 'Chat', 'Chat'],
     ['security', 'Securitate', 'Securitate'],
     ['users', 'Utilizatori', 'Utilizatori'],
@@ -293,6 +297,8 @@
       else if (view === 'security') paintSecurity();
       else if (view === 'users') paintUsers();
       else if (view === 'audit') paintAudit();
+      else if (view === 'checks') paintChecks();
+      else if (view === 'driverdocs') paintDriverDocs();
       else chatCleanup = paintMap();
       applyPerms();
     }
@@ -1328,6 +1334,85 @@
             </div>`).join('') : '<p class="text-sm text-muted py-4 text-center">Nicio autentificare înregistrată încă.</p>')}
         </section>`;
       $view.querySelector('#auditTable').addEventListener('change', (e) => { auditTable = e.target.value; paintAudit(); });
+    }
+
+    // ----- Verificări vehicule (de la șoferi) -----
+    let chkVehicle = '', chkOnlyProblems = false;
+    const CHECK_LABEL = { tires: 'Anvelope', lights: 'Lumini', brakes: 'Frâne', oil: 'Ulei și lichide', body: 'Caroserie', other: 'Alte verificări' };
+
+    async function paintChecks() {
+      $view.innerHTML = '<h1 class="text-2xl font-semibold text-navy-900">Verificări vehicule</h1><p class="mt-4 text-muted">Se încarcă…</p>';
+      const { data, error } = await sb.from('vehicle_checks').select('*').order('created_at', { ascending: false }).limit(200);
+      if (view !== 'checks') return;
+      if (error) { $view.innerHTML = needMigration('Verificări vehicule', '006_driver_portal.sql', error.message); return; }
+      const rows = (data || []).filter((c) => (!chkVehicle || c.vehicle_id === chkVehicle) && (!chkOnlyProblems || c.has_problem));
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Verificări vehicule</h1>
+        <p class="text-muted">Checklist-urile completate de șoferi înainte de drum. Problemele apar și în Defecțiuni.</p>
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <select id="chkVeh" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">${vehicleOptions(chkVehicle, true)}</select>
+          <label class="flex items-center gap-2 text-sm text-ink"><input id="chkProb" type="checkbox" ${chkOnlyProblems ? 'checked' : ''}> Doar cu probleme</label>
+        </div>
+        <div class="mt-4 space-y-3">
+          ${rows.length ? rows.map((c) => `
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+              <div class="flex items-start gap-3">
+                <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${c.has_problem ? DOT.red : DOT.green}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex flex-wrap items-baseline gap-x-2">
+                    <h2 class="font-semibold text-navy-900">${esc(plateOf(c.vehicle_id))}</h2>
+                    <span class="text-muted text-sm">${esc(emailOf(c.user_id))} · ${fmtDT(c.created_at)}${c.km != null ? ' · ' + nf(c.km) + ' km' : ''}</span>
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-1.5">
+                    ${Object.entries(c.items || {}).map(([k, v]) => `<span class="text-xs px-2 py-1 rounded-full ${v === 'problem' ? 'bg-red-50 text-signal-red' : 'bg-green-50 text-signal-green'}">${esc(CHECK_LABEL[k] || k)}: ${v === 'problem' ? 'problemă' : 'ok'}</span>`).join('')}
+                  </div>
+                  ${c.notes ? `<p class="mt-2 text-sm text-slate-700 break-words">${esc(c.notes)}</p>` : ''}
+                  ${(c.photos || []).length ? `<div class="mt-2 flex flex-wrap gap-2">${c.photos.map((p, i) => `<button data-cphoto="${esc(p)}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Poza ${i + 1}</button>`).join('')}</div>` : ''}
+                </div>
+              </div>
+            </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nicio verificare în filtrul ales.</p>'}
+        </div>`;
+
+      $view.querySelector('#chkVeh').addEventListener('change', (e) => { chkVehicle = e.target.value; paintChecks(); });
+      $view.querySelector('#chkProb').addEventListener('change', (e) => { chkOnlyProblems = e.target.checked; paintChecks(); });
+      $view.querySelectorAll('[data-cphoto]').forEach((b) => b.addEventListener('click', () => showPhoto('driver-docs', b.dataset.cphoto)));
+    }
+
+    // ----- Documente șoferi (CMR, dovezi de livrare) -----
+    let ddType = '';
+
+    async function paintDriverDocs() {
+      $view.innerHTML = '<h1 class="text-2xl font-semibold text-navy-900">Documente șoferi</h1><p class="mt-4 text-muted">Se încarcă…</p>';
+      const { data, error } = await sb.from('driver_documents').select('*').order('created_at', { ascending: false }).limit(300);
+      if (view !== 'driverdocs') return;
+      if (error) { $view.innerHTML = needMigration('Documente șoferi', '006_driver_portal.sql', error.message); return; }
+      const types = ['CMR', 'Dovadă livrare', 'Fotografie', 'Altele'];
+      const rows = (data || []).filter((d) => !ddType || d.doc_type === ddType);
+      const tripTitle = (id) => (trips.find((t) => t.id === id) || {}).title;
+
+      $view.innerHTML = `
+        <h1 class="text-2xl font-semibold text-navy-900">Documente șoferi</h1>
+        <p class="text-muted">CMR, dovezi de livrare și fotografii încărcate de șoferi.</p>
+        <div class="mt-5">
+          <select id="ddType" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            <option value="">Toate tipurile</option>
+            ${types.map((t) => `<option ${ddType === t ? 'selected' : ''}>${t}</option>`).join('')}
+          </select>
+        </div>
+        <div class="mt-4 space-y-3">
+          ${rows.length ? rows.map((d) => `
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex items-center gap-3">
+              <div class="min-w-0 flex-1">
+                <div class="font-semibold text-navy-900">${esc(d.doc_type)}${d.title ? ' · ' + esc(d.title) : ''}</div>
+                <div class="text-sm text-muted">${esc(emailOf(d.user_id))} · ${fmtDT(d.created_at)}${d.vehicle_id ? ' · ' + esc(plateOf(d.vehicle_id)) : ''}${d.trip_id && tripTitle(d.trip_id) ? ' · ' + esc(tripTitle(d.trip_id)) : ''}</div>
+              </div>
+              <button data-ddopen="${esc(d.file_path)}" class="shrink-0 text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Deschide</button>
+            </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Niciun document încărcat de șoferi.</p>'}
+        </div>`;
+
+      $view.querySelector('#ddType').addEventListener('change', (e) => { ddType = e.target.value; paintDriverDocs(); });
+      $view.querySelectorAll('[data-ddopen]').forEach((b) => b.addEventListener('click', () => openFile('driver-docs', b.dataset.ddopen)));
     }
 
     // ----- Finanțe -----
