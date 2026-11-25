@@ -119,7 +119,7 @@
       }[t.status] || []);
 
       const card = (t) => `
-        <article class="bg-white rounded-xl border border-slate-200 p-4">
+        <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
           <div class="flex items-start gap-2">
             <span class="mt-2 w-2.5 h-2.5 rounded-full shrink-0 ${T_DOT[t.status]}"></span>
             <div class="min-w-0">
@@ -161,7 +161,7 @@
         <h1 class="text-2xl font-semibold text-navy-900">Alimentare nouă</h1>
         ${notice ? `<p class="mt-3 text-sm rounded-lg bg-green-50 text-signal-green px-3 py-2">${esc(notice)}</p>` : ''}
         ${vehicles.length ? `
-        <form id="fuelForm" class="mt-4 bg-white rounded-xl border border-slate-200 p-4 space-y-4" novalidate>
+        <form id="fuelForm" class="mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4" novalidate>
           <label class="block">
             <span class="block text-sm font-medium mb-1">Vehicul</span>
             <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
@@ -196,7 +196,7 @@
         <h2 class="mt-8 mb-3 font-semibold text-slate-600">Ultimele mele alimentări</h2>
         <div class="space-y-2">
           ${logs.length ? logs.map((l) => `
-            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm">
               <div class="flex justify-between gap-2">
                 <span class="font-medium text-navy-900">${esc(plate(l.vehicle_id))}</span>
                 <span class="text-slate-500">${fmtDate(l.created_at)}</span>
@@ -451,7 +451,7 @@
         <h2 class="mt-8 mb-3 font-semibold text-slate-600">Verificările mele</h2>
         <div class="space-y-2">
           ${(past || []).length ? past.map((c) => `
-            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm">
               <div class="flex items-center justify-between gap-2">
                 <span class="font-medium text-navy-900">${esc(plateOf(c.vehicle_id))}</span>
                 <span class="flex items-center gap-1.5 text-slate-600"><i class="w-2.5 h-2.5 rounded-full ${c.has_problem ? 'bg-signal-red' : 'bg-signal-green'}"></i>${c.has_problem ? 'Cu probleme' : 'În regulă'}</span>
@@ -545,7 +545,7 @@
         <h2 class="mt-8 mb-3 font-semibold text-slate-600">Documentele mele</h2>
         <div class="space-y-2">
           ${(mine || []).length ? mine.map((d) => `
-            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm flex items-center gap-3">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm flex items-center gap-3">
               <div class="min-w-0 flex-1">
                 <div class="font-medium text-navy-900">${esc(d.doc_type)}${d.title ? ' · ' + esc(d.title) : ''}</div>
                 <div class="text-slate-400">${fmtDT(d.created_at)}${d.vehicle_id ? ' · ' + esc(plateOf(d.vehicle_id)) : ''}</div>
@@ -593,7 +593,7 @@
         <h1 class="text-2xl font-semibold text-navy-900">Raportează o defecțiune</h1>
         ${notice ? `<p class="mt-3 text-sm rounded-lg bg-green-50 text-signal-green px-3 py-2">${esc(notice)}</p>` : ''}
         ${vehicles.length ? `
-        <form id="defForm" class="mt-4 bg-white rounded-xl border border-slate-200 p-4 space-y-4" novalidate>
+        <form id="defForm" class="mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 p-4 space-y-4" novalidate>
           <label class="block">
             <span class="block text-sm font-medium mb-1">Vehicul</span>
             <select name="vehicle" class="field w-full rounded-lg border border-slate-300 px-3 py-2.5 bg-white">
@@ -624,7 +624,7 @@
         <h2 class="mt-8 mb-3 font-semibold text-slate-600">Rapoartele mele</h2>
         <div class="space-y-2">
           ${defects.length ? defects.map((d) => `
-            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm">
               <div class="flex items-center justify-between gap-2">
                 <span class="font-medium text-navy-900">${esc(plate(d.vehicle_id))} · ${esc(d.category || '')}</span>
                 <span class="flex items-center gap-1.5 text-slate-600 shrink-0"><i class="w-2.5 h-2.5 rounded-full ${D_DOT[d.status]}"></i>${D_STATUS[d.status]}</span>

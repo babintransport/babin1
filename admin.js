@@ -217,6 +217,7 @@
     let histVehicle = '', histDriver = '', lookup = { vid: '', t: '' };
     let docVehicle = '', docsError = '', tripsError = '', tripFilter = '';
     let finRange = 'month', finVehicle = '', finError = '', svcFilter = 'planned';
+    let alertLevel = '', vehQuery = '', vehLevel = '', defFilter = '', taskDriver = '';
     let loading = true;
     let loadError = '';
 
@@ -507,8 +508,9 @@
     function paintAlerts() {
       const rows = vehicles.map((v) => ({ v, st: statusOf(v) })).sort((a, b) => LEVEL[a.st.worst] - LEVEL[b.st.worst]);
       const count = (lvl) => rows.filter((r) => r.st.worst === lvl).length;
+      const shown = rows.filter((r) => !alertLevel || r.st.worst === alertLevel);
       const tile = (label, n, cls) => `
-        <div class="bg-white rounded-xl border border-slate-200 p-4 flex items-center gap-3">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex items-center gap-3">
           <span class="w-3.5 h-3.5 rounded-full ${cls}"></span>
           <div><div class="text-2xl font-semibold text-navy-900">${n}</div><div class="text-sm text-slate-500">${label}</div></div>
         </div>`;
@@ -519,9 +521,12 @@
         <div class="mt-5 grid grid-cols-3 gap-3">
           ${tile('Urgent', count('red'), DOT.red)}${tile('Atenție', count('yellow'), DOT.yellow)}${tile('În regulă', count('green'), DOT.green)}
         </div>
-        <div class="mt-5 space-y-3">
-          ${rows.length ? rows.map(({ v, st }) => `
-            <article class="bg-white rounded-xl border border-slate-200 p-4">
+        <div class="mt-5 flex flex-wrap gap-2 text-sm">
+          ${[['', 'Toate'], ['red', 'Urgent'], ['yellow', 'Atenție'], ['green', 'În regulă']].map(([k, l]) => `<button data-alv="${k}" class="px-3 py-1.5 rounded-full ${alertLevel === k ? 'bg-navy-900 text-white' : 'bg-white border border-slate-200 text-muted hover:bg-slate-50'}">${l}</button>`).join('')}
+        </div>
+        <div class="mt-4 space-y-3">
+          ${shown.length ? shown.map(({ v, st }) => `
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
               <div class="flex items-center gap-3">
                 <span class="w-3 h-3 rounded-full ${DOT[st.worst]}"></span>
                 <h2 class="font-semibold text-navy-900">${esc(v.plate_number)}</h2>
@@ -531,49 +536,83 @@
             </article>`).join('') : emptyState()}
         </div>`;
       bindAdd();
+      $view.querySelectorAll('[data-alv]').forEach((b) => b.addEventListener('click', () => { alertLevel = b.dataset.alv; paint(); }));
     }
 
     // ----- Vehicule -----
     function paintVehicles() {
+      const card = (v) => {
+        const st = statusOf(v);
+        return `
+        <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex items-start gap-3 min-w-0">
+              <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${DOT[st.worst]}"></span>
+              <div class="min-w-0">
+                <h2 class="font-semibold text-navy-900 text-lg">${esc(v.plate_number)}</h2>
+                <p class="text-muted truncate">${esc(v.model || 'Model necompletat')}</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap justify-end gap-2 shrink-0">
+              <button data-vdocs="${v.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Documente (${(v.docs || []).length})</button>
+              <button data-edit="${v.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Editează</button>
+              <button data-del="${v.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
+            </div>
+          </div>
+          <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-600">
+            <dt>Kilometraj</dt><dd>${v.current_km != null ? nf(v.current_km) + ' km' : '–'}</dd>
+            <dt>Anvelope</dt><dd>${esc(TIRE[v.tire_type] || '–')}</dd>
+            <dt>Dispozitiv PAJ</dt><dd class="truncate">${esc(v.paj_device_id || '–')}</dd>
+          </dl>
+          <div class="mt-3 pt-3 border-t border-slate-100 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            ${statusItem('TÜV', st.tuv)}${statusItem('Ulei', st.oil)}${statusItem('Anvelope', st.tire)}${statusItem('Documente', st.doc)}${statusItem('Service', st.svc)}
+          </div>
+        </article>`;
+      };
+      const cards = () => {
+        const q = vehQuery.trim().toLowerCase();
+        const list = vehicles.filter((v) =>
+          (!q || `${v.plate_number} ${v.model || ''}`.toLowerCase().includes(q)) && (!vehLevel || statusOf(v).worst === vehLevel));
+        if (list.length) return list.map(card).join('');
+        return vehicles.length ? '<p class="text-sm text-muted py-8 text-center md:col-span-2">Niciun vehicul nu corespunde filtrului.</p>' : emptyState();
+      };
+
       $view.innerHTML = `
         <div class="flex items-center justify-between gap-3">
-          <h1 class="text-2xl font-semibold text-navy-900">Vehicule</h1>
-          <button data-add class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă vehicul</button>
+          <div>
+            <h1 class="text-2xl font-semibold text-navy-900">Flotă</h1>
+            <p class="text-muted">${vehicles.length} vehicule. Stare, documente și scadențe pentru fiecare.</p>
+          </div>
+          <button data-add class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2 shrink-0">Adaugă vehicul</button>
         </div>
-        <div class="mt-5 grid gap-3 md:grid-cols-2">
-          ${vehicles.length ? vehicles.map((v) => {
-            const st = statusOf(v);
-            return `
-            <article class="bg-white rounded-xl border border-slate-200 p-4">
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <h2 class="font-semibold text-navy-900 text-lg">${esc(v.plate_number)}</h2>
-                  <p class="text-slate-500 truncate">${esc(v.model || 'Model necompletat')}</p>
-                </div>
-                <div class="flex flex-wrap justify-end gap-2 shrink-0">
-                  <button data-vdocs="${v.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Documente (${(v.docs || []).length})</button>
-                  <button data-edit="${v.id}" class="text-sm px-3 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50">Editează</button>
-                  <button data-del="${v.id}" class="text-sm px-3 py-1.5 rounded-lg border border-red-200 text-signal-red hover:bg-red-50">Șterge</button>
-                </div>
-              </div>
-              <dl class="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-slate-600">
-                <dt>Kilometraj</dt><dd>${v.current_km != null ? nf(v.current_km) + ' km' : '–'}</dd>
-                <dt>Anvelope</dt><dd>${esc(TIRE[v.tire_type] || '–')}</dd>
-                <dt>Dispozitiv PAJ</dt><dd class="truncate">${esc(v.paj_device_id || '–')}</dd>
-              </dl>
-              <div class="mt-3 pt-3 border-t border-slate-100 grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-                ${statusItem('TÜV', st.tuv)}${statusItem('Ulei', st.oil)}${statusItem('Anvelope', st.tire)}${statusItem('Documente', st.doc)}${statusItem('Service', st.svc)}
-              </div>
-            </article>`;
-          }).join('') : emptyState()}
-        </div>`;
-      bindAdd();
-      $view.querySelectorAll('[data-edit]').forEach((b) =>
-        b.addEventListener('click', () => openForm(vehicles.find((v) => v.id === b.dataset.edit))));
-      $view.querySelectorAll('[data-del]').forEach((b) =>
-        b.addEventListener('click', () => removeVehicle(vehicles.find((v) => v.id === b.dataset.del))));
-      $view.querySelectorAll('[data-vdocs]').forEach((b) =>
-        b.addEventListener('click', () => { docVehicle = b.dataset.vdocs; view = 'documents'; paint(); window.scrollTo(0, 0); }));
+        <div class="mt-5 flex flex-wrap items-center gap-3">
+          <input id="vehSearch" type="search" value="${esc(vehQuery)}" placeholder="Caută după număr sau model"
+                 class="field w-full sm:w-72 rounded-lg border border-slate-300 px-3 py-2 text-sm bg-white">
+          <div class="flex flex-wrap gap-2 text-sm">
+            ${[['', 'Toate'], ['red', 'Urgent'], ['yellow', 'Atenție'], ['green', 'În regulă']].map(([k, l]) => `<button data-vlv="${k}" class="px-3 py-1.5 rounded-full ${vehLevel === k ? 'bg-navy-900 text-white' : 'bg-white border border-slate-200 text-muted hover:bg-slate-50'}">${l}</button>`).join('')}
+          </div>
+        </div>
+        <div id="vehList" class="mt-4 grid gap-4 md:grid-cols-2">${cards()}</div>`;
+
+      const list = $view.querySelector('#vehList');
+      const bindCards = () => {
+        list.querySelectorAll('[data-add]').forEach((b) => b.addEventListener('click', () => openForm(null)));
+        list.querySelectorAll('[data-edit]').forEach((b) =>
+          b.addEventListener('click', () => openForm(vehicles.find((v) => v.id === b.dataset.edit))));
+        list.querySelectorAll('[data-del]').forEach((b) =>
+          b.addEventListener('click', () => removeVehicle(vehicles.find((v) => v.id === b.dataset.del))));
+        list.querySelectorAll('[data-vdocs]').forEach((b) =>
+          b.addEventListener('click', () => { docVehicle = b.dataset.vdocs; view = 'documents'; paint(); window.scrollTo(0, 0); }));
+      };
+      bindCards();
+      $view.querySelector('[data-add]').addEventListener('click', () => openForm(null));
+      $view.querySelector('#vehSearch').addEventListener('input', (e) => {
+        vehQuery = e.target.value;
+        list.innerHTML = cards();
+        bindCards();
+        applyPerms();
+      });
+      $view.querySelectorAll('[data-vlv]').forEach((b) => b.addEventListener('click', () => { vehLevel = b.dataset.vlv; paint(); }));
     }
 
     function bindAdd() {
@@ -684,7 +723,7 @@
 
     function paintTasks() {
       const col = (st) => {
-        const items = tasks.filter((t) => t.status === st);
+        const items = tasks.filter((t) => t.status === st && (!taskDriver || t.assigned_to === taskDriver));
         return `
           <section>
             <h2 class="flex items-center gap-2 font-semibold text-navy-900 mb-3">
@@ -693,7 +732,7 @@
             </h2>
             <div class="space-y-3">
               ${items.map((t) => `
-                <article class="bg-white rounded-xl border border-slate-200 p-3">
+                <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-3">
                   <p class="font-medium text-slate-800 break-words">${esc(t.title)}</p>
                   <p class="text-sm text-slate-500 mt-0.5 truncate">${esc(who(t.assigned_to))}</p>
                   <div class="mt-3 flex items-center gap-2">
@@ -708,12 +747,19 @@
 
       $view.innerHTML = `
         <div class="flex items-center justify-between gap-3">
-          <h1 class="text-2xl font-semibold text-navy-900">Task-uri</h1>
+          <div><h1 class="text-2xl font-semibold text-navy-900">Task-uri</h1><p class="text-muted">Repartizează sarcini și urmărește starea lor.</p></div>
           <button data-tadd class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă task</button>
         </div>
-        <div class="mt-5 grid gap-6 md:grid-cols-3">${col('open')}${col('in_progress')}${col('done')}</div>`;
+        <div class="mt-5">
+          <select id="taskDriver" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
+            <option value="">Toți șoferii</option>
+            ${people.map((p) => `<option value="${p.id}" ${taskDriver === p.id ? 'selected' : ''}>${esc(p.email)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="mt-4 grid gap-6 md:grid-cols-3">${col('open')}${col('in_progress')}${col('done')}</div>`;
 
       $view.querySelector('[data-tadd]').addEventListener('click', () => openTaskForm(null));
+      $view.querySelector('#taskDriver').addEventListener('change', (e) => { taskDriver = e.target.value; paint(); });
       $view.querySelectorAll('[data-tedit]').forEach((b) =>
         b.addEventListener('click', () => openTaskForm(tasks.find((t) => t.id === b.dataset.tedit))));
       $view.querySelectorAll('[data-tdel]').forEach((b) =>
@@ -831,7 +877,7 @@
     }
 
     function paintDefects() {
-      const rows = [...defects].sort((a, b) =>
+      const rows = defects.filter((d) => !defFilter || d.status === defFilter).sort((a, b) =>
         D_ORDER[a.status] - D_ORDER[b.status] || new Date(b.created_at) - new Date(a.created_at));
       const open = defects.filter((d) => d.status !== 'resolved').length;
       const options = (cur) => Object.entries(D_STATUS)
@@ -840,9 +886,12 @@
       $view.innerHTML = `
         <h1 class="text-2xl font-semibold text-navy-900">Defecțiuni</h1>
         <p class="text-slate-500 mt-1">${open ? open + ' nerezolvate' : 'Nicio defecțiune nerezolvată.'}</p>
+        <div class="mt-5 flex flex-wrap gap-2 text-sm">
+          ${[['', 'Toate'], ['new', 'Noi'], ['in_progress', 'În lucru'], ['resolved', 'Rezolvate']].map(([k, l]) => `<button data-dfl="${k}" class="px-3 py-1.5 rounded-full ${defFilter === k ? 'bg-navy-900 text-white' : 'bg-white border border-slate-200 text-muted hover:bg-slate-50'}">${l}</button>`).join('')}
+        </div>
         <div class="mt-5 space-y-3">
           ${rows.length ? rows.map((d) => `
-            <article class="bg-white rounded-xl border border-slate-200 p-4">
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
               <div class="flex items-start gap-3">
                 <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${D_DOT[d.status]}"></span>
                 <div class="min-w-0 flex-1">
@@ -862,6 +911,7 @@
             </article>`).join('') : '<p class="rounded-xl border border-dashed border-slate-300 p-8 text-center text-slate-500">Nu a fost raportată nicio defecțiune.</p>'}
         </div>`;
 
+      $view.querySelectorAll('[data-dfl]').forEach((b) => b.addEventListener('click', () => { defFilter = b.dataset.dfl; paint(); }));
       $view.querySelectorAll('[data-dstatus]').forEach((sel) => sel.addEventListener('change', async () => {
         const d = defects.find((x) => x.id === sel.dataset.dstatus);
         const { error } = await sb.from('defects').update({ status: sel.value }).eq('id', sel.dataset.dstatus);
@@ -923,14 +973,14 @@
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 50);
 
       const tile = (label, value) => `
-        <div class="bg-white rounded-xl border border-slate-200 p-4">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
           <div class="text-xl font-semibold text-navy-900">${value}</div>
           <div class="text-sm text-slate-500">${label}</div>
         </div>`;
 
       $view.innerHTML = `
         <div class="flex items-center justify-between gap-3">
-          <h1 class="text-2xl font-semibold text-navy-900">Combustibil</h1>
+          <div><h1 class="text-2xl font-semibold text-navy-900">Combustibil</h1><p class="text-muted">Alimentări, consum în L/100 km și bonuri.</p></div>
           <select id="fuelRange" class="field text-sm rounded-lg border border-slate-300 px-3 py-2 bg-white">
             <option value="all" ${fuelRange === 'all' ? 'selected' : ''}>Toată perioada</option>
             <option value="30" ${fuelRange === '30' ? 'selected' : ''}>Ultimele 30 de zile</option>
@@ -947,7 +997,7 @@
           ${summary.length ? summary.map((r) => {
             const v = vehicles.find((x) => x.id === r.vid) || {};
             return `
-            <article class="bg-white rounded-xl border border-slate-200 p-4">
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
               <div class="flex items-center gap-3">
                 <span class="w-3 h-3 rounded-full ${DOT[r.level]}"></span>
                 <h3 class="font-semibold text-navy-900">${esc(v.plate_number || '–')}</h3>
@@ -970,7 +1020,7 @@
           ${logs.map((l) => {
             const odd = l.cons != null && (l.cons < CONS_MIN || l.cons > CONS_MAX);
             return `
-            <div class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm">
               <div class="flex justify-between gap-2">
                 <span class="font-medium text-navy-900">${esc(plateOf(l.vehicle_id))}</span>
                 <span class="text-slate-500">${fmtTs(l.created_at)}</span>
@@ -1032,11 +1082,11 @@
 
       $view.innerHTML = `
         <div class="flex items-center justify-between gap-3">
-          <h1 class="text-2xl font-semibold text-navy-900">Istoric șoferi</h1>
+          <div><h1 class="text-2xl font-semibold text-navy-900">Istoric șoferi</h1><p class="text-muted">Cine a condus ce vehicul și când.</p></div>
           <button data-hadd class="rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă</button>
         </div>
 
-        <section class="mt-5 bg-white rounded-xl border border-slate-200 p-4">
+        <section class="mt-5 bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
           <h2 class="font-semibold text-navy-900">Cine conducea?</h2>
           <p class="text-sm text-slate-500">Pentru radare și amenzi: alege vehiculul și momentul din document.</p>
           <div class="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto] items-end">
@@ -1057,7 +1107,7 @@
 
         <div class="mt-4 space-y-3">
           ${rows.length ? rows.map((h) => `
-            <article class="bg-white rounded-xl border border-slate-200 p-4">
+            <article class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4">
               <div class="flex items-start gap-3">
                 <span class="mt-2 w-3 h-3 rounded-full shrink-0 ${h.end_time ? 'bg-slate-300' : DOT.green}"></span>
                 <div class="min-w-0 flex-1">
@@ -2182,7 +2232,7 @@
           (noId ? ` · ${noId} vehicule fără ID PAJ` : '');
 
         $list.innerHTML = rows.map((r) => `
-          <button data-pin="${esc(r.key)}" class="w-full text-left bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm flex items-center gap-3 hover:bg-slate-50">
+          <button data-pin="${esc(r.key)}" class="w-full text-left bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm flex items-center gap-3 hover:bg-slate-50">
             <span class="w-3 h-3 rounded-full shrink-0" style="background:${r.color}"></span>
             <span class="font-medium text-navy-900">${esc(r.label)}</span>
             <span class="text-slate-500">${r.speed} km/h</span>
@@ -2198,7 +2248,7 @@
 
         // dispozitivele PAJ și ID-urile lor (de copiat în Vehicule → ID dispozitiv PAJ)
         $devices.innerHTML = `
-          <details class="bg-white rounded-xl border border-slate-200 px-4 py-3 text-sm">
+          <details class="bg-white rounded-2xl shadow-sm border border-slate-100 px-4 py-3 text-sm">
             <summary class="cursor-pointer font-medium text-slate-700">Dispozitive PAJ (${devices.length})</summary>
             <div class="mt-3 space-y-1.5">
               ${devices.map((d) => { const v = vehicleFor(d); return `
