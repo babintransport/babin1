@@ -29,37 +29,60 @@
     let tasks = [], vehicles = [], logs = [], defects = [], trips = [], myOpen = null, tripsError = '';
     let loading = true, loadError = '', notice = '', lastVehicle = '';
 
+    const icon = (id, cls) => (window.FleetUI ? window.FleetUI.svgIcon(id, cls) : '');
+    const NAV = [
+      ['home', 'Acasă', 'dashboard'], ['trips', 'Curse', 'trips'], ['tasks', 'Task-uri', 'tasks'], ['fuel', 'Alimentări', 'fuel'],
+      ['defects', 'Defecțiuni', 'defects'], ['checks', 'Verificare', 'checks'], ['docs', 'Documente', 'documents'],
+      ['messages', 'Mesaje', 'messages'], ['chat', 'Chat', 'chat']
+    ];
+
     root.innerHTML = `
-      <style>.tab-btn[aria-current="page"] { color: #16834A; font-weight: 600; box-shadow: inset 0 2px 0 #16834A; }</style>
-      <div class="min-h-full bg-surface">
-        <header class="bg-navy-900 text-white px-4 py-3 flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <img src="icons/logo-white.png" alt="Babin Transport" class="h-8 w-auto">
-            <div class="text-xs text-slate-300 truncate mt-1">${esc(profile.email)}</div>
+      <style>
+        .nav-btn[aria-current="page"] { background: #16834A; color: #fff; font-weight: 600; }
+        .tab-btn[aria-current="page"] { color: #16834A; font-weight: 600; box-shadow: inset 0 2px 0 #16834A; }
+      </style>
+      <div class="min-h-full md:flex bg-surface">
+        <aside class="hidden md:flex md:flex-col md:w-64 md:sticky md:top-0 md:h-screen bg-navy-900 text-white p-4 gap-5">
+          <div class="px-2 pt-2"><img src="icons/logo-white.png" alt="Babin Transport" class="w-40 h-auto"></div>
+          <nav class="flex flex-col gap-1 overflow-y-auto">
+            ${NAV.map(([id, label, ic]) => `<button data-nav="${id}" class="nav-btn flex items-center gap-3 text-left px-3 py-2.5 rounded-lg text-slate-200 hover:bg-white/10">${icon(ic)}<span>${label}</span></button>`).join('')}
+          </nav>
+          <div class="mt-auto px-2 text-sm">
+            <p class="italic text-signal-green font-medium">Mereu în mișcare!</p>
+            <button data-logout class="mt-3 w-full bg-white/10 hover:bg-white/20 rounded-lg px-3 py-2">Deconectare</button>
           </div>
-          <button data-logout class="text-sm bg-white/10 rounded-lg px-3 py-1.5 shrink-0">Deconectare</button>
-        </header>
-        <main id="empView" class="p-4 pb-24 max-w-xl mx-auto"></main>
-        <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex overflow-x-auto"
+        </aside>
+
+        <div class="flex-1 min-w-0">
+          <header class="flex items-center justify-between gap-3 px-4 md:px-8 py-3 bg-white border-b border-slate-100">
+            <img src="icons/logo-navy.png" alt="Babin Transport" class="h-8 w-auto md:hidden">
+            <p class="hidden md:block text-sm text-muted capitalize">${new Date().toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</p>
+            <div class="flex items-center gap-3">
+              <div class="hidden sm:flex items-center gap-2">
+                <span class="w-9 h-9 rounded-full bg-signal-green text-white font-semibold flex items-center justify-center">${esc(profile.email.charAt(0).toUpperCase())}</span>
+                <div class="leading-tight">
+                  <div class="text-sm font-medium text-ink max-w-[11rem] truncate">${esc(profile.email)}</div>
+                  <div class="text-xs text-muted">Șofer</div>
+                </div>
+              </div>
+              <button data-logout class="md:hidden text-sm border border-slate-300 rounded-lg px-3 py-1.5">Ieșire</button>
+            </div>
+          </header>
+          <main id="empView" class="p-4 md:p-8 pb-24 md:pb-8 max-w-3xl"></main>
+        </div>
+
+        <nav class="md:hidden fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex overflow-x-auto"
              style="padding-bottom:env(safe-area-inset-bottom,0px)">
-          <button data-nav="home" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Acasă</button>
-          <button data-nav="trips" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Curse</button>
-          <button data-nav="tasks" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Task-uri</button>
-          <button data-nav="fuel" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Alimentări</button>
-          <button data-nav="defects" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Defecțiuni</button>
-          <button data-nav="checks" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Verificare</button>
-          <button data-nav="docs" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Documente</button>
-          <button data-nav="messages" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Mesaje</button>
-          <button data-nav="chat" class="tab-btn py-3 px-4 shrink-0 text-sm text-slate-500">Chat</button>
+          ${NAV.map(([id, label, ic]) => `<button data-nav="${id}" class="tab-btn py-2 px-3 shrink-0 text-xs text-slate-500 flex flex-col items-center gap-0.5">${icon(ic)}<span>${label}</span></button>`).join('')}
         </nav>
       </div>`;
 
     const $view = root.querySelector('#empView');
-    root.querySelector('[data-logout]').addEventListener('click', () => {
+    root.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', () => {
       window.ChatNotifier.stop();
       window.MessagesNotifier.stop();
       onLogout();
-    });
+    }));
     window.ChatNotifier.start({
       sb, profile, root,
       isViewingChat: () => view === 'chat',
@@ -318,49 +341,84 @@
 
     // ---------- Acasă ----------
     function paintHome() {
+      const now = new Date();
       const current = trips.find((t) => t.status === 'in_progress');
       const next = current || trips.find((t) => t.status === 'planned' || t.status === 'accepted');
       const task = tasks.find((t) => t.status !== 'done');
       const veh = myOpen ? vehicles.find((v) => v.id === myOpen.vehicle_id) : null;
+      const activeTrips = trips.filter((t) => ['planned', 'accepted', 'in_progress'].includes(t.status)).length;
+      const openTasks = tasks.filter((t) => t.status !== 'done').length;
+      const openDefects = defects.filter((d) => d.status !== 'resolved').length;
+      const fuelMonth = logs.filter((l) => { const d = new Date(l.created_at); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).length;
+      const greet = now.getHours() < 12 ? 'Bună dimineața' : now.getHours() < 18 ? 'Bună ziua' : 'Bună seara';
       const box = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-4';
 
-      $view.innerHTML = `
-        <h1 class="text-2xl font-semibold text-navy-900">Bună ziua!</h1>
-        <p class="text-muted break-all">${esc(profile.email)}</p>
+      const tile = (ic, tone, value, label) => `
+        <div class="${box} flex items-center gap-3">
+          <div class="w-11 h-11 rounded-full flex items-center justify-center shrink-0 ${tone}">${icon(ic, 'w-5 h-5')}</div>
+          <div class="min-w-0"><div class="text-xl font-semibold text-ink leading-tight">${value}</div><div class="text-xs text-muted">${label}</div></div>
+        </div>`;
+      const action = (go, ic, tone, label) => `
+        <button data-go="${go}" class="${box} flex flex-col items-start gap-3 text-left hover:bg-slate-50">
+          <span class="w-11 h-11 rounded-full flex items-center justify-center ${tone}">${icon(ic, 'w-5 h-5')}</span>
+          <span class="font-medium text-navy-900">${label}</span>
+        </button>`;
 
-        <section class="mt-5 ${box}">
-          <h2 class="text-sm font-medium text-muted">Vehiculul tău acum</h2>
-          ${veh
-            ? `<p class="mt-1 text-xl font-semibold text-navy-900">${esc(veh.plate_number)}</p><p class="text-sm text-muted">${esc(veh.model || '')}${veh.current_km != null ? ' · ' + nf(veh.current_km) + ' km' : ''}</p>`
-            : '<p class="mt-1 text-slate-500">Niciun vehicul preluat. Apare aici când începi o cursă sau când ți-l repartizează administratorul.</p>'}
+      $view.innerHTML = `
+        <section class="relative overflow-hidden rounded-2xl text-white p-5 md:p-6" style="background:linear-gradient(135deg,#102A49 0%,#183A5C 62%,#16834A 150%)">
+          <div class="absolute -right-6 -bottom-8 opacity-10 pointer-events-none">${icon('vehicles', 'w-44 h-44')}</div>
+          <div class="relative">
+            <p class="text-sm text-slate-200 capitalize">${now.toLocaleDateString('ro-RO', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+            <h1 class="text-2xl md:text-3xl font-semibold mt-1">${greet}!</h1>
+            <p class="text-slate-200 break-all">${esc(profile.email)}</p>
+            <div class="mt-4 rounded-xl bg-white/10 p-4 flex items-center gap-4">
+              <span class="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center shrink-0">${icon('vehicles', 'w-6 h-6')}</span>
+              <div class="min-w-0">
+                <div class="text-xs text-slate-200">Vehiculul tău acum</div>
+                ${veh
+                  ? `<div class="text-2xl font-semibold leading-tight">${esc(veh.plate_number)}</div><div class="text-sm text-slate-200">${esc(veh.model || '')}${veh.current_km != null ? ' · ' + nf(veh.current_km) + ' km' : ''}</div>`
+                  : '<div class="font-medium">Niciun vehicul preluat</div><div class="text-sm text-slate-200">Apare când începi o cursă.</div>'}
+              </div>
+            </div>
+          </div>
         </section>
 
+        <div class="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${tile('trips', 'bg-blue-50 text-navy-800', activeTrips, 'Curse active')}
+          ${tile('tasks', 'bg-green-50 text-signal-green', openTasks, 'Task-uri deschise')}
+          ${tile('fuel', 'bg-blue-50 text-navy-800', fuelMonth, 'Alimentări luna aceasta')}
+          ${tile('defects', 'bg-amber-50 text-signal-yellow', openDefects, 'Defecțiuni deschise')}
+        </div>
+
+        <h2 class="mt-6 mb-3 font-semibold text-navy-900">Acțiuni rapide</h2>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          ${action('fuel', 'fuel', 'bg-blue-50 text-navy-800', 'Adaugă alimentare')}
+          ${action('defects', 'defects', 'bg-amber-50 text-signal-yellow', 'Raportează defecțiune')}
+          ${action('checks', 'checks', 'bg-green-50 text-signal-green', 'Verifică vehiculul')}
+          ${action('docs', 'documents', 'bg-blue-50 text-navy-800', 'Încarcă document')}
+        </div>
+
         ${tripsError ? '' : `
-        <div class="mt-5 flex items-center justify-between">
-          <h2 class="text-sm font-medium text-muted">${current ? 'Cursa curentă' : 'Următoarea cursă'}</h2>
+        <div class="mt-6 mb-3 flex items-center justify-between">
+          <h2 class="font-semibold text-navy-900">${current ? 'Cursa curentă' : 'Următoarea cursă'}</h2>
           <button data-go="trips" class="text-sm text-signal-green font-medium">Toate cursele →</button>
         </div>
-        <div class="mt-2">${next ? tripCard(next) : `<p class="${box} text-slate-500">Nicio cursă planificată.</p>`}</div>`}
+        ${next ? tripCard(next) : `<p class="${box} text-slate-500">Nicio cursă planificată.</p>`}`}
 
         <section class="mt-5 ${box}">
           <div class="flex items-center justify-between"><h2 class="text-sm font-medium text-muted">Următorul task</h2><button data-go="tasks" class="text-sm text-signal-green font-medium">Toate →</button></div>
           <p class="mt-1 ${task ? 'text-ink font-medium' : 'text-slate-500'} break-words">${task ? esc(task.title) : 'Nu ai task-uri active.'}</p>
         </section>
 
-        <div class="mt-5 grid grid-cols-2 gap-3">
-          <button data-go="fuel" class="${box} text-left font-medium text-navy-900">Adaugă alimentare</button>
-          <button data-go="defects" class="${box} text-left font-medium text-navy-900">Raportează defecțiune</button>
-        </div>
-
-        <section class="mt-5 ${box}">
-          <h2 class="text-sm font-medium text-muted">Contul meu</h2>
-          <form id="pwForm" class="mt-2 space-y-2" novalidate>
+        <details class="mt-5 ${box}">
+          <summary class="cursor-pointer text-sm font-medium text-muted">Contul meu · schimbă parola</summary>
+          <form id="pwForm" class="mt-3 space-y-2" novalidate>
             <input name="pw" type="password" autocomplete="new-password" minlength="8" placeholder="Parolă nouă (minimum 8 caractere)"
                    class="field w-full rounded-lg border border-slate-300 px-3 py-2.5">
             <p id="pwMsg" class="hidden text-sm"></p>
             <button type="submit" class="w-full rounded-lg border border-slate-300 hover:bg-slate-50 py-2.5 font-medium disabled:opacity-60">Schimbă parola</button>
           </form>
-        </section>`;
+        </details>`;
 
       bindTrips();
       $view.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => { view = b.dataset.go; notice = ''; paint(); window.scrollTo(0, 0); }));

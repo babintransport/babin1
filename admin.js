@@ -21,7 +21,7 @@
   const PAGES = {
     manager: ['dashboard', 'vehicles', 'trips', 'documents', 'service', 'finance', 'alerts', 'tasks', 'defects', 'fuel', 'drivers', 'checks', 'driverdocs', 'chat', 'messages', 'map', 'security'],
     accountant: ['dashboard', 'finance', 'fuel', 'service', 'documents', 'driverdocs', 'vehicles', 'chat', 'messages', 'security'],
-    mechanic: ['service', 'defects', 'checks', 'vehicles', 'documents', 'alerts', 'chat', 'messages', 'security']
+    mechanic: ['dashboard', 'service', 'defects', 'checks', 'vehicles', 'documents', 'alerts', 'chat', 'messages', 'security']
   };
   // Cine poate modifica date pe fiecare pagină (ceilalți văd doar)
   const PAGE_WRITE = {
@@ -291,7 +291,7 @@
         b.dataset.nav === view ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
       if (loading) { $view.innerHTML = '<p class="text-slate-500">Se încarcă…</p>'; return; }
       if (loadError) { $view.innerHTML = `<p class="rounded-lg bg-red-50 text-signal-red px-3 py-2">${esc(loadError)}</p>`; return; }
-      if (view === 'dashboard') paintDashboard();
+      if (view === 'dashboard') (ROLE === 'mechanic' ? paintMechanicHome : ROLE === 'accountant' ? paintAccountantHome : paintDashboard)();
       else if (view === 'alerts') paintAlerts();
       else if (view === 'vehicles') paintVehicles();
       else if (view === 'tasks') paintTasks();
@@ -318,6 +318,209 @@
         <p class="text-slate-600">Nu ai niciun vehicul încă.</p>
         <button data-add class="mt-3 rounded-lg bg-navy-900 hover:bg-navy-800 text-white px-4 py-2">Adaugă primul vehicul</button>
       </div>`;
+
+    // ----- Pagini de start pe rol: Mecanic și Contabil -----
+    const hero = (title, sub, stats, iconId) => `
+      <section class="relative overflow-hidden rounded-2xl text-white p-5 md:p-6" style="background:linear-gradient(135deg,#102A49 0%,#183A5C 62%,#16834A 150%)">
+        <div class="absolute -right-6 -bottom-8 opacity-10 pointer-events-none">${svgIcon(iconId || 'vehicles', 'w-44 h-44')}</div>
+        <div class="relative">
+          <h1 class="text-2xl md:text-3xl font-semibold">${title}</h1>
+          <p class="text-slate-200 mt-1">${sub}</p>
+          <div class="mt-4 grid grid-cols-3 gap-3">
+            ${stats.map(([v, l]) => `<div class="rounded-xl bg-white/10 px-3 py-2.5"><div class="text-xl md:text-2xl font-semibold leading-tight">${v}</div><div class="text-xs text-slate-200">${l}</div></div>`).join('')}
+          </div>
+        </div>
+      </section>`;
+
+    const kpiBox = (icon, tone, value, label, sub) => `
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-4 flex items-center gap-4">
+        <div class="w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${tone}">${svgIcon(icon, 'w-6 h-6')}</div>
+        <div class="min-w-0">
+          <div class="text-2xl font-semibold text-ink leading-tight">${value}</div>
+          <div class="text-sm text-muted">${label}</div>
+          ${sub ? `<div class="text-xs mt-0.5">${sub}</div>` : ''}
+        </div>
+      </div>`;
+
+    const panel = 'bg-white rounded-2xl shadow-sm border border-slate-100 p-5';
+    const panelLink = (go, label) => `<button data-go="${go}" class="text-sm text-signal-green font-medium hover:underline">${label} →</button>`;
+    const bindGo = () => $view.querySelectorAll('[data-go]').forEach((b) =>
+      b.addEventListener('click', () => { view = b.dataset.go; paint(); window.scrollTo(0, 0); }));
+
+    const worstTextOf = (st) => {
+      const hit = [['TÜV', st.tuv], ['Ulei', st.oil], ['Anvelope', st.tire], ['Documente', st.doc], ['Service', st.svc]].find(([, x]) => x.level === st.worst);
+      return hit ? `${hit[0]}: ${hit[1].text}` : 'Fără date pentru alerte';
+    };
+
+    function costByMonth(n, kinds) {
+      const now = new Date();
+      const key = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+      const agg = {};
+      const add = (k, c) => { agg[k] = (agg[k] || 0) + c; };
+      if (kinds.includes('fuel')) fuel.forEach((l) => add(key(new Date(l.created_at)), Number(l.total_price)));
+      if (kinds.includes('exp')) expenses.forEach((x) => add(key(new Date(x.expense_date + 'T00:00:00')), Number(x.amount)));
+      if (kinds.includes('job')) jobs.filter((j) => j.status === 'done' && j.cost != null)
+        .forEach((j) => add(key(new Date((j.done_date || j.scheduled_date) + 'T00:00:00')), Number(j.cost)));
+      const out = [];
+      for (let i = n - 1; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        out.push({ label: d.toLocaleDateString('ro-RO', { month: 'short' }).replace('.', ''), cost: agg[key(d)] || 0 });
+      }
+      return out;
+    }
+
+    function chartSvg(months, label) {
+      const W = 560, H = 230, L = 52, R = 8, T = 12, B = 28;
+      const max = Math.max(...months.map((m) => m.cost), 0);
+      if (!max) return '<p class="text-sm text-muted py-10 text-center">Nu există date în această perioadă.</p>';
+      const mag = Math.pow(10, Math.floor(Math.log10(max / 4)));
+      const step = Math.ceil(max / 4 / mag) * mag, top = step * 4;
+      const iw = (W - L - R) / months.length, bw = Math.min(40, iw * 0.55);
+      const y = (v) => T + (H - T - B) * (1 - v / top);
+      let grid = '';
+      for (let i = 0; i <= 4; i++) {
+        const v = step * i;
+        grid += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#E5E9EF"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end" font-size="11" fill="#718096">${nf(Math.round(v))} €</text>`;
+      }
+      const bars = months.map((m, i) => {
+        const x = L + iw * i + (iw - bw) / 2;
+        return `<g><rect class="bar" x="${x}" y="${y(m.cost)}" width="${bw}" height="${(H - T - B) * (m.cost / top)}" rx="4" fill="#16834A"><title>${esc(m.label)}: ${eur(m.cost)}</title></rect><text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" font-size="11" fill="#718096">${esc(m.label)}</text></g>`;
+      }).join('');
+      return `<svg viewBox="0 0 ${W} ${H}" class="w-full h-auto" role="img" aria-label="${esc(label)}">${grid}${bars}</svg>`;
+    }
+
+    function paintMechanicHome() {
+      const rows = vehicles.map((v) => ({ v, st: statusOf(v) }));
+      const newDef = defects.filter((d) => d.status === 'new');
+      const wipDef = defects.filter((d) => d.status === 'in_progress');
+      const planned = jobs.filter((j) => j.status === 'planned' && j.scheduled_date)
+        .sort((x, y) => (x.scheduled_date < y.scheduled_date ? -1 : 1));
+      const overdue = planned.filter((j) => daysUntil(j.scheduled_date) < 0);
+      const soon = planned.filter((j) => { const n = daysUntil(j.scheduled_date); return n >= 0 && n <= 14; });
+      const urgent = rows.filter((r) => r.st.worst === 'red').length;
+      const monthKey = ymd(new Date()).slice(0, 7);
+      const doneMonth = jobs.filter((j) => j.status === 'done' && (j.done_date || '').slice(0, 7) === monthKey).length;
+      const todo = [...newDef, ...wipDef].slice(0, 6);
+      const pill = (j) => { const n = daysUntil(j.scheduled_date); return n < 0
+        ? '<span class="text-xs font-medium px-2.5 py-1 rounded-full bg-red-50 text-signal-red">Întârziat</span>'
+        : `<span class="text-xs font-medium px-2.5 py-1 rounded-full ${n <= 7 ? 'bg-amber-50 text-signal-yellow' : 'bg-slate-100 text-muted'}">${n === 0 ? 'Azi' : 'în ' + n + ' zile'}</span>`; };
+
+      $view.innerHTML = `
+        ${hero('Atelier', 'Defecțiuni, lucrări programate și starea vehiculelor.', [[newDef.length, 'defecțiuni noi'], [soon.length, 'programate în 14 zile'], [overdue.length, 'lucrări întârziate']], 'service')}
+
+        <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          ${kpiBox('defects', 'bg-red-50 text-signal-red', newDef.length, 'Defecțiuni noi', '')}
+          ${kpiBox('defects', 'bg-amber-50 text-signal-yellow', wipDef.length, 'Defecțiuni în lucru', '')}
+          ${kpiBox('service', 'bg-blue-50 text-navy-800', soon.length, 'Service în următoarele 14 zile', '')}
+          ${kpiBox('service', 'bg-red-50 text-signal-red', overdue.length, 'Lucrări întârziate', '')}
+          ${kpiBox('checks', 'bg-green-50 text-signal-green', doneMonth, 'Lucrări efectuate luna aceasta', '')}
+          ${kpiBox('vehicles', 'bg-red-50 text-signal-red', urgent, 'Vehicule cu alertă urgentă', '')}
+        </div>
+
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">
+          <section class="${panel}">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Defecțiuni de rezolvat</h2>${panelLink('defects', 'Toate')}</div>
+            ${todo.length ? todo.map((d) => `
+              <div class="flex items-center gap-3 py-2.5 border-t border-slate-100 first:border-0">
+                <span class="w-3 h-3 rounded-full shrink-0 ${d.status === 'new' ? DOT.red : DOT.yellow}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-ink">${esc(plateOf(d.vehicle_id))} <span class="text-muted font-normal">${esc(d.category || '')}</span></div>
+                  <div class="text-sm text-muted truncate">${esc(d.description)}</div>
+                </div>
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nicio defecțiune de rezolvat.</p>'}
+          </section>
+
+          <section class="${panel}">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Service programat</h2>${panelLink('service', 'Toate')}</div>
+            ${planned.length ? planned.slice(0, 6).map((j) => `
+              <div class="flex items-center gap-3 py-2.5 border-t border-slate-100 first:border-0">
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-ink">${esc(plateOf(j.vehicle_id))} <span class="text-muted font-normal">${esc(j.kind)}</span></div>
+                  <div class="text-sm text-muted">${fmtDate(j.scheduled_date)}</div>
+                </div>
+                ${pill(j)}
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nicio lucrare programată.</p>'}
+          </section>
+
+          <section class="${panel}">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Vehicule cu alerte</h2>${panelLink('vehicles', 'Flotă')}</div>
+            ${[...rows].sort((x, y) => LEVEL[x.st.worst] - LEVEL[y.st.worst]).slice(0, 5).map(({ v, st }) => `
+              <div class="flex items-center gap-3 py-2.5 border-t border-slate-100 first:border-0">
+                <span class="w-3 h-3 rounded-full shrink-0 ${DOT[st.worst]}"></span>
+                <div class="min-w-0 flex-1">
+                  <div class="font-medium text-ink">${esc(v.plate_number)} <span class="text-muted font-normal">${esc(v.model || '')}</span></div>
+                  <div class="text-sm text-muted truncate">${esc(worstTextOf(st))}</div>
+                </div>
+              </div>`).join('') || '<p class="text-sm text-muted py-6 text-center">Niciun vehicul în flotă.</p>'}
+          </section>
+
+          <section class="${panel}">
+            <h2 class="font-semibold text-navy-900 mb-3">Costuri service pe luni</h2>
+            ${chartSvg(costByMonth(6, ['job']), 'Costuri service pe luni')}
+          </section>
+        </div>`;
+      bindGo();
+    }
+
+    function paintAccountantHome() {
+      const now = new Date();
+      const sinceM = ymd(new Date(now.getFullYear(), now.getMonth(), 1));
+      const rows = finRows(sinceM, '');
+      const sum = (f) => rows.filter(f).reduce((s, r) => s + r.amount, 0);
+      const total = sum(() => true), fuelT = sum((r) => r.cat === 'Combustibil'), svcT = sum((r) => r.cat === 'Service');
+      const otherT = total - fuelT - svcT;
+
+      const pv = {};
+      rows.forEach((r) => { pv[r.vehicle_id] = (pv[r.vehicle_id] || 0) + r.amount; });
+      const pvRows = Object.entries(pv).sort((x, y) => y[1] - x[1]).slice(0, 6);
+      const maxV = pvRows.length ? pvRows[0][1] : 1;
+
+      $view.innerHTML = `
+        ${hero('Finanțe', 'Cheltuielile flotei, pe luna curentă.', [[eur(total), 'total luna aceasta'], [eur(fuelT), 'combustibil'], [eur(svcT), 'service']], 'finance')}
+
+        <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+          ${kpiBox('euro', 'bg-green-50 text-signal-green', eur(total), 'Total cheltuieli', 'luna aceasta')}
+          ${kpiBox('fuel', 'bg-blue-50 text-navy-800', eur(fuelT), 'Combustibil', '')}
+          ${kpiBox('service', 'bg-amber-50 text-signal-yellow', eur(svcT), 'Service efectuat', '')}
+          ${kpiBox('finance', 'bg-blue-50 text-navy-800', eur(otherT), 'Alte cheltuieli', 'asigurări, taxe, altele')}
+          ${kpiBox('driverdocs', 'bg-green-50 text-signal-green', '<span id="cmrCount">–</span>', 'Documente noi de la șoferi', 'ultimele 7 zile')}
+        </div>
+
+        <div class="mt-6 grid gap-4 lg:grid-cols-2">
+          <section class="${panel}">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Cheltuieli pe vehicul</h2>${panelLink('finance', 'Finanțe')}</div>
+            ${pvRows.length ? pvRows.map(([vid, v]) => `
+              <div class="mb-3">
+                <div class="flex justify-between text-sm"><span class="font-medium text-ink">${esc(plateOf(vid))}</span><span class="font-semibold">${eur(v)}</span></div>
+                <div class="mt-1 h-2 rounded-full bg-slate-100"><div class="h-2 rounded-full bg-signal-green" style="width:${Math.max(3, (v / maxV) * 100)}%"></div></div>
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nicio cheltuială luna aceasta.</p>'}
+          </section>
+
+          <section class="${panel}">
+            <h2 class="font-semibold text-navy-900 mb-3">Cheltuieli lunare</h2>
+            ${chartSvg(costByMonth(6, ['fuel', 'exp', 'job']), 'Cheltuieli lunare')}
+            <p class="mt-2 text-xs text-muted">Combustibil, service efectuat și alte cheltuieli.</p>
+          </section>
+
+          <section class="${panel} lg:col-span-2">
+            <div class="flex items-center justify-between mb-3"><h2 class="font-semibold text-navy-900">Ultimele cheltuieli</h2>${panelLink('finance', 'Toate')}</div>
+            ${rows.length ? rows.slice(0, 8).map((r) => `
+              <div class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 border-t border-slate-100 first:border-0 text-sm">
+                <span class="text-muted w-20 shrink-0">${fmtDate(r.date)}</span>
+                <span class="font-medium text-ink">${esc(plateOf(r.vehicle_id))}</span>
+                <span class="text-muted">${esc(r.cat)}</span>
+                <span class="text-muted truncate min-w-0 flex-1">${esc(r.desc)}</span>
+                <span class="font-semibold">${eur(r.amount)}</span>
+              </div>`).join('') : '<p class="text-sm text-muted py-6 text-center">Nicio cheltuială luna aceasta.</p>'}
+          </section>
+        </div>`;
+      bindGo();
+
+      // documente noi încărcate de șoferi (dacă modulul 006 este activ)
+      const since7 = new Date(Date.now() - 7 * 86400000).toISOString();
+      sb.from('driver_documents').select('id', { count: 'exact', head: true }).gte('created_at', since7)
+        .then((r) => { const el = $view.querySelector('#cmrCount'); if (el && view === 'dashboard') el.textContent = r.error ? '–' : String(r.count || 0); });
+    }
 
     // ----- Prezentare generală -----
     let dashMonths = 6;
@@ -1496,13 +1699,14 @@
       return '0000-01-01';
     };
 
-    function finRows() {
-      const since = finSince();
+    function finRows(sinceArg, vehArg) {
+      const since = sinceArg != null ? sinceArg : finSince();
+      const vehF = vehArg != null ? vehArg : finVehicle;
       const rows = [];
       fuel.forEach((l) => rows.push({ date: String(l.created_at).slice(0, 10), vehicle_id: l.vehicle_id, cat: 'Combustibil', amount: Number(l.total_price), desc: `${n1(l.liters, 2)} L`, km: l.kilometers, src: 'fuel' }));
       expenses.forEach((x) => rows.push({ date: x.expense_date, vehicle_id: x.vehicle_id, cat: EXP_CAT[x.category] || x.category, amount: Number(x.amount), desc: [x.description, x.supplier].filter(Boolean).join(' · '), src: 'expense', id: x.id, file: x.file_path }));
       jobs.filter((j) => j.status === 'done' && j.cost != null).forEach((j) => rows.push({ date: j.done_date || j.scheduled_date, vehicle_id: j.vehicle_id, cat: 'Service', amount: Number(j.cost), desc: `${j.kind}${j.workshop ? ' – ' + j.workshop : ''}`, src: 'job', file: j.file_path }));
-      return rows.filter((r) => r.date && r.date >= since && (!finVehicle || r.vehicle_id === finVehicle))
+      return rows.filter((r) => r.date && r.date >= since && (!vehF || r.vehicle_id === vehF))
         .sort((x, y) => (x.date < y.date ? 1 : -1));
     }
 
@@ -2298,4 +2502,5 @@
   }
 
   window.AdminPanel = { mount };
+  window.FleetUI = { svgIcon };
 })();
